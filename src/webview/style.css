@@ -1,0 +1,184 @@
+/* Map Crepe's theme variables onto the current VS Code color theme. */
+html,
+body {
+  margin: 0;
+  padding: 0;
+  background: var(--vscode-editor-background);
+  color: var(--vscode-editor-foreground);
+}
+
+body {
+  min-height: 100vh;
+}
+
+/* Fixed color modes (setting mdLive.theme) override VS Code's theme variables. */
+body[data-theme='light'] {
+  color-scheme: light;
+  --vscode-editor-background: #ffffff;
+  --vscode-editor-foreground: #3b3b3b;
+  --vscode-editorWidget-background: #f8f8f8;
+  --vscode-editorWidget-border: #c8c8c8;
+  --vscode-descriptionForeground: #6f6f6f;
+  --vscode-textLink-foreground: #005fb8;
+  --vscode-editor-selectionBackground: #add6ff;
+  --vscode-editorHoverWidget-background: #f8f8f8;
+  --vscode-editorHoverWidget-foreground: #3b3b3b;
+  --vscode-textPreformat-foreground: #a31515;
+  --vscode-errorForeground: #f85149;
+  --vscode-list-hoverBackground: #f2f2f2;
+  --vscode-list-inactiveSelectionBackground: #e4e6f1;
+  --vscode-textCodeBlock-background: #f2f2f2;
+}
+
+body[data-theme='dark'] {
+  color-scheme: dark;
+  --vscode-editor-background: #1f1f1f;
+  --vscode-editor-foreground: #cccccc;
+  --vscode-editorWidget-background: #202020;
+  --vscode-editorWidget-border: #454545;
+  --vscode-descriptionForeground: #9d9d9d;
+  --vscode-textLink-foreground: #4daafc;
+  --vscode-editor-selectionBackground: #264f78;
+  --vscode-editorHoverWidget-background: #202020;
+  --vscode-editorHoverWidget-foreground: #cccccc;
+  --vscode-textPreformat-foreground: #d0d0d0;
+  --vscode-errorForeground: #f85149;
+  --vscode-list-hoverBackground: #2a2d2e;
+  --vscode-list-inactiveSelectionBackground: #37373d;
+  --vscode-textCodeBlock-background: #2b2b2b;
+}
+
+.milkdown {
+  --crepe-color-background: var(--vscode-editor-background);
+  --crepe-color-on-background: var(--vscode-editor-foreground);
+  --crepe-color-surface: var(--vscode-editorWidget-background);
+  --crepe-color-surface-low: var(--vscode-editorWidget-background);
+  --crepe-color-on-surface: var(--vscode-editor-foreground);
+  --crepe-color-on-surface-variant: var(--vscode-descriptionForeground);
+  --crepe-color-outline: var(--vscode-editorWidget-border, var(--vscode-descriptionForeground));
+  --crepe-color-primary: var(--vscode-textLink-foreground);
+  --crepe-color-secondary: var(--vscode-editor-selectionBackground);
+  --crepe-color-on-secondary: var(--vscode-editor-foreground);
+  --crepe-color-inverse: var(--vscode-editorHoverWidget-background);
+  --crepe-color-on-inverse: var(--vscode-editorHoverWidget-foreground);
+  --crepe-color-inline-code: var(--vscode-textPreformat-foreground);
+  --crepe-color-error: var(--vscode-errorForeground);
+  --crepe-color-hover: var(--vscode-list-hoverBackground);
+  --crepe-color-selected: var(--vscode-list-inactiveSelectionBackground);
+  --crepe-color-inline-area: var(--vscode-textCodeBlock-background);
+
+  --crepe-base-font-size: 16px;
+  --crepe-font-title: var(--vscode-font-family);
+  --crepe-font-default: var(--vscode-font-family);
+  --crepe-font-code: var(--vscode-editor-font-family);
+
+  --crepe-shadow-1: 0px 1px 3px 1px rgba(0, 0, 0, 0.15), 0px 1px 2px 0px rgba(0, 0, 0, 0.3);
+  --crepe-shadow-2: 0px 2px 6px 2px rgba(0, 0, 0, 0.15), 0px 1px 2px 0px rgba(0, 0, 0, 0.3);
+}
+
+.milkdown .ProseMirror {
+  max-width: 900px;
+  margin: 0 auto;
+  padding: 40px 80px;
+}
+
+.milkdown ::selection {
+  background: var(--vscode-editor-selectionBackground);
+}
+
+/* Resizable images (OneNote-style corner handles). */
+.milkdown .mdlive-image {
+  margin: 8px 0;
+}
+
+.milkdown .mdlive-image-wrapper {
+  position: relative;
+  display: inline-block;
+  max-width: 100%;
+  line-height: 0;
+}
+
+.milkdown .mdlive-image-wrapper img {
+  display: block;
+  max-width: 100%;
+  height: auto;
+}
+
+.milkdown .mdlive-image-wrapper:hover,
+.milkdown .mdlive-image.selected .mdlive-image-wrapper,
+.milkdown .mdlive-image.resizing .mdlive-image-wrapper {
+  outline: 1px solid var(--vscode-focusBorder, var(--vscode-textLink-foreground));
+}
+
+.milkdown .mdlive-handle {
+  position: absolute;
+  width: 10px;
+  height: 10px;
+  box-sizing: border-box;
+  background: var(--vscode-editor-background);
+  border: 1px solid var(--vscode-focusBorder, var(--vscode-textLink-foreground));
+  display: none;
+  touch-action: none;
+}
+
+.milkdown .mdlive-image-wrapper:hover .mdlive-handle,
+.milkdown .mdlive-image.selected .mdlive-handle,
+.milkdown .mdlive-image.resizing .mdlive-handle {
+  display: block;
+}
+
+.milkdown .mdlive-handle.nw { left: -5px; top: -5px; cursor: nwse-resize; }
+.milkdown .mdlive-handle.ne { right: -5px; top: -5px; cursor: nesw-resize; }
+.milkdown .mdlive-handle.sw { left: -5px; bottom: -5px; cursor: nesw-resize; }
+.milkdown .mdlive-handle.se { right: -5px; bottom: -5px; cursor: nwse-resize; }
+
+.milkdown .mdlive-size {
+  position: absolute;
+  right: 6px;
+  bottom: 6px;
+  display: none;
+  padding: 2px 6px;
+  border-radius: 3px;
+  background: rgba(0, 0, 0, 0.65);
+  color: #fff;
+  font-size: 11px;
+  line-height: 1.4;
+}
+
+.milkdown .mdlive-image.resizing .mdlive-size {
+  display: block;
+}
+
+.milkdown mark {
+  background: rgba(255, 208, 0, 0.4);
+  color: inherit;
+  border-radius: 2px;
+  padding: 0 1px;
+}
+
+/* Semi-transparent so they work in light and dark themes; the file stores the Obsidian colors. */
+.milkdown mark[data-color='red'] {
+  background: rgba(255, 70, 110, 0.4);
+}
+
+.milkdown mark[data-color='green'] {
+  background: rgba(60, 200, 90, 0.4);
+}
+
+.milkdown mark[data-color='blue'] {
+  background: rgba(70, 140, 255, 0.4);
+}
+
+/* Tighter bullet points (Crepe: 4px paragraph padding, 32px bullet box). */
+.milkdown .milkdown-list-item-block li p {
+  padding: 1px 0;
+}
+
+.milkdown .milkdown-list-item-block li .label-wrapper,
+.milkdown .milkdown-list-item-block li .label-wrapper .label {
+  height: calc(1.5em + 2px);
+}
+
+.milkdown .milkdown-list-item-block li .label-wrapper .label {
+  padding: 1px 0;
+}

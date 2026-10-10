@@ -1,0 +1,158 @@
+import * as path from 'path';
+import * as vscode from 'vscode';
+
+// Each note `foo.md` keeps its images in a sibling folder `foo.assets/`, linked relatively.
+const ASSETS_SUFFIX = '.assets';
+// Relative link to a sibling assets folder: `(foo.assets/123.png`, `"foo.assets/…`, `<foo.assets/…`.
+const ASSET_REF = /(?<=[("'<])([^\s/()"'<>]+)\.assets\/([\w.-]+)/g;
+
+const MIME_EXTENSIONS: Record<string, string> = {
+  'image/png': '.png',
+  'image/jpeg': '.jpg',
+  'image/gif': '.gif',
+  'image/webp': '.webp',
+  'image/svg+xml': '.svg',
+};
+
+const fs = vscode.workspace.fs;
+
+function noteBase(note: vscode.Uri): string {
+  return path.basename(note.path, path.extname(note.path));
+}
+
+function assetsDir(note: vscode.Uri): vscode.Uri {
+  return vscode.Uri.joinPath(note, '..', noteBase(note) + ASSETS_SUFFIX);
+}
+
+function assetsRef(note: vscode.Uri): string {
+  return encodeURIComponent(noteBase(note)) + ASSETS_SUFFIX + '/';
+}
+
+function isNote(uri: vscode.Uri): boolean {
+  return uri.path.toLowerCase().endsWith('.md');
+}
+
+async function exists(uri: vscode.Uri): Promise<boolean> {
+  return fs.stat(uri).then(
+    () => true,
+    () => false,
+  );
+}
+
+function escapeRegExp(text: string): string {
+  return text.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+}
+
+async function readText(uri: vscode.Uri): Promise<string> {
+  return new TextDecoder().decode(await fs.readFile(uri));
+}
+
+// Saves image bytes into the note's assets folder and returns the Markdown-relative path.
+export async function saveImage(note: vscode.Uri, name: string, mime: string, data: string): Promise<string> {
+  const dir = assetsDir(note);
+  await fs.createDirectory(dir);
+  const ext = path.extname(name).toLowerCase() || MIME_EXTENSIONS[mime] || '.png';
+  const fileName = `${Date.now()}${ext}`;
+  await fs.writeFile(vscode.Uri.joinPath(dir, fileName), Buffer.from(data, 'base64'));
+  return assetsRef(note) + fileName;
+}
+
+// Looks next to the note first; a note copied into another folder only finds its images via search.
+async function findAsset(note: vscode.Uri, folder: string, file: string, search: boolean): Promise<vscode.Uri | undefined> {
+  const sibling = vscode.Uri.joinPath(note, '..', folder, file);
+  if (await exists(sibling)) {
+    return sibling;
+  }
+  if (!search) {
+    return undefined;
+  }
+  // `null` exclude: assets folders are usually hidden via files.exclude.
+  const [found] = await vscode.workspace.findFiles(`**/${folder}/${file}`, null, 1);
+  return found;
+}
+
+// Copies images linked from other notes' assets folders (e.g. after copying a note or pasting an image
+// from another note) into this note's own folder and relinks them, so every folder has a single owner.
+// `search` also looks for missing images in the whole workspace (too slow to run on every edit).
+export async function adoptAssets(note: vscode.Uri, text: string, search = false): Promise<string> {
+  const own = noteBase(note);
+  let result = text;
+  for (const [ref, folder, file] of text.matchAll(ASSET_REF)) {
+    const name = decodeURIComponent(folder);
+    const target = vscode.Uri.joinPath(assetsDir(note), file);
+    if (name === own && (!search || (await exists(target)))) {
+      continue;
+    }
+    const src = await findAsset(note, name + ASSETS_SUFFIX, file, search);
+    if (!src) {
+      continue;
+    }
+    await fs.createDirectory(assetsDir(note));
+    await fs.copy(src, target, { overwrite: true });
+    result = result.replaceAll(ref, assetsRef(note) + file);
+  }
+  return result;
+}
+
+// Moves images that are no longer linked from the note to the trash.
+export async function cleanupAssets(document: vscode.TextDocument): Promise<void> {
+  const dir = assetsDir(document.uri);
+  if (!(await exists(document.uri)) || !(await exists(dir))) {
+    return;
+  }
+  // Unsaved text counts too, so an image pasted right before closing survives until the save lands.
+  const text = (await readText(document.uri)) + document.getText();
+  for (const [name, type] of await fs.readDirectory(dir)) {
+    if (type === vscode.FileType.File && !text.includes(name)) {
+      await fs.delete(vscode.Uri.joinPath(dir, name), { useTrash: true });
+    }
+  }
+  if ((await fs.readDirectory(dir)).length === 0) {
+    await fs.delete(dir, { recursive: true, useTrash: true });
+  }
+}
+
+async function rewriteNote(note: vscode.Uri, change: (text: string) => Promise<string> | string): Promise<void> {
+  const document = await vscode.workspace.openTextDocument(note);
+  const text = await change(document.getText());
+  if (text === document.getText()) {
+    return;
+  }
+  const edit = new vscode.WorkspaceEdit();
+  edit.replace(note, new vscode.Range(0, 0, document.lineCount, 0), text);
+  await vscode.workspace.applyEdit(edit);
+  await document.save();
+}
+
+// Keeps assets folders next to their notes when notes are renamed, moved, copied or deleted in VS Code.
+export function registerAssetSync(): vscode.Disposable {
+  return vscode.Disposable.from(
+    vscode.workspace.onDidRenameFiles(async (e) => {
+      for (const { oldUri, newUri } of e.files) {
+        if (!isNote(oldUri) || !isNote(newUri)) {
+          continue;
+        }
+        const oldDir = assetsDir(oldUri);
+        const newDir = assetsDir(newUri);
+        if (!(await exists(oldDir)) || (await exists(newDir))) {
+          continue;
+        }
+        await fs.rename(oldDir, newDir);
+        const oldRef = new RegExp(`(?<=[("'<])${escapeRegExp(assetsRef(oldUri))}`, 'g');
+        await rewriteNote(newUri, (text) => text.replace(oldRef, assetsRef(newUri)));
+      }
+    }),
+    vscode.workspace.onDidCreateFiles(async (e) => {
+      for (const uri of e.files.filter(isNote)) {
+        await rewriteNote(uri, (text) => adoptAssets(uri, text, true));
+      }
+    }),
+    vscode.workspace.onDidDeleteFiles(async (e) => {
+      for (const uri of e.files.filter(isNote)) {
+        if (await exists(assetsDir(uri))) {
+          await fs.delete(assetsDir(uri), { recursive: true, useTrash: true });
+        }
+      }
+    }),
+  );
+}

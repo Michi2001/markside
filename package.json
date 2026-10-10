@@ -1,0 +1,133 @@
+{
+  "name": "markdown-live-editor",
+  "displayName": "Markdown Live Editor",
+  "description": "Obsidian-like live preview editing for Markdown files, with image paste and Claude selection hand-off.",
+  "version": "0.1.0",
+  "publisher": "michael",
+  "license": "MIT",
+  "engines": {
+    "vscode": "^1.95.0"
+  },
+  "categories": [
+    "Other"
+  ],
+  "main": "./dist/extension.js",
+  "contributes": {
+    "customEditors": [
+      {
+        "viewType": "mdLive.editor",
+        "displayName": "Markdown Live Editor",
+        "selector": [
+          {
+            "filenamePattern": "*.md"
+          }
+        ],
+        "priority": "option"
+      }
+    ],
+    "commands": [
+      {
+        "command": "mdLive.open",
+        "title": "Open in Live Editor",
+        "category": "Markdown Live",
+        "icon": "$(edit)"
+      },
+      {
+        "command": "mdLive.openAsText",
+        "title": "Open as Raw Markdown",
+        "category": "Markdown Live",
+        "icon": "$(code)"
+      },
+      {
+        "command": "mdLive.sendSelectionToClaude",
+        "title": "Send Selection to Claude (Alt+K)",
+        "category": "Markdown Live",
+        "icon": "$(sparkle)"
+      },
+      {
+        "command": "mdLive.chooseTheme",
+        "title": "Choose Color Mode",
+        "category": "Markdown Live",
+        "icon": "$(color-mode)"
+      }
+    ],
+    "menus": {
+      "editor/title": [
+        {
+          "command": "mdLive.open",
+          "when": "editorLangId == markdown && !activeCustomEditorId",
+          "group": "navigation@1"
+        },
+        {
+          "command": "mdLive.openAsText",
+          "when": "activeCustomEditorId == mdLive.editor",
+          "group": "navigation@1"
+        },
+        {
+          "command": "mdLive.sendSelectionToClaude",
+          "when": "activeCustomEditorId == mdLive.editor",
+          "group": "navigation@2"
+        },
+        {
+          "command": "mdLive.chooseTheme",
+          "when": "activeCustomEditorId == mdLive.editor",
+          "group": "navigation@3"
+        }
+      ],
+      "commandPalette": [
+        {
+          "command": "mdLive.open",
+          "when": "editorLangId == markdown && !activeCustomEditorId"
+        },
+        {
+          "command": "mdLive.openAsText",
+          "when": "activeCustomEditorId == mdLive.editor"
+        },
+        {
+          "command": "mdLive.sendSelectionToClaude",
+          "when": "activeCustomEditorId == mdLive.editor"
+        },
+        {
+          "command": "mdLive.chooseTheme",
+          "when": "activeCustomEditorId == mdLive.editor"
+        }
+      ]
+    },
+    "configuration": {
+      "title": "Markdown Live Editor",
+      "properties": {
+        "mdLive.theme": {
+          "type": "string",
+          "enum": [
+            "auto",
+            "light",
+            "dark"
+          ],
+          "default": "auto",
+          "enumDescriptions": [
+            "Follow the current VS Code color theme.",
+            "Always use a light editor.",
+            "Always use a dark editor."
+          ],
+          "description": "Color mode of the Markdown Live Editor."
+        }
+      }
+    }
+  },
+  "scripts": {
+    "build": "node esbuild.mjs",
+    "vscode:prepublish": "npm run build",
+    "watch": "node esbuild.mjs --watch",
+    "package": "npx @vscode/vsce package --no-dependencies"
+  },
+  "devDependencies": {
+    "@types/node": "^26.6.5",
+    "@types/vscode": "^1.95.0",
+    "esbuild": "^0.28.2",
+    "typescript": "^7.0.2"
+  },
+  "dependencies": {
+    "@milkdown/crepe": "^7.22.3",
+    "@milkdown/kit": "^7.22.3"
+  }
+}
