@@ -52,9 +52,7 @@ export async function saveImage(note: vscode.Uri, name: string, mime: string, da
   const dir = assetsDir(note);
   await fs.createDirectory(dir);
   // Handwritten drawings keep their double extension so the webview can reopen them for editing.
-  const ext = name.toLowerCase().endsWith('.drawing.svg')
-    ? '.drawing.svg'
-    : path.extname(name).toLowerCase() || MIME_EXTENSIONS[mime] || '.png';
+  const ext = /(\.image)?\.drawing\.svg$/i.exec(name)?.[0].toLowerCase() ?? (path.extname(name).toLowerCase() || MIME_EXTENSIONS[mime] || '.png');
   const fileName = `${Date.now()}${ext}`;
   await fs.writeFile(vscode.Uri.joinPath(dir, fileName), Buffer.from(data, 'base64'));
   return assetsRef(note) + fileName;

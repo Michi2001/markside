@@ -6,7 +6,7 @@ import { clearTextInCurrentBlockCommand } from '@milkdown/kit/preset/commonmark'
 import { type EditorState, TextSelection } from '@milkdown/kit/prose/state';
 import type { EditorView } from '@milkdown/kit/prose/view';
 import { callCommand, insert, replaceAll } from '@milkdown/kit/utils';
-import { DRAWING_SUFFIX, isDrawingOpen, loadStrokes, openDrawingEditor } from './drawing';
+import { type Drawing, type DrawingFile, drawingFile, imageDrawing, isDrawing, isDrawingOpen, loadDrawing, openDrawingEditor } from './drawing';
 import { createImageBlockView, extendImageBlockSchema, remarkHtmlImages } from './imageView';
 import { highlight } from './highlight';
 import { setHeading, shiftHeading } from './headings';
@@ -45,11 +45,13 @@ function fileToBase64(file: File): Promise<string> {
 }
 
 async function uploadImage(file: File): Promise<string> {
+  return saveFile({ name: file.name, mime: file.type, data: await fileToBase64(file) });
+}
+
+function saveFile(file: DrawingFile): Promise<string> {
   const id = ++uploadCounter;
-  const data = await fileToBase64(file);
-  const saved = new Promise<string>((resolve) => pendingUploads.set(id, resolve));
-  vscode.postMessage({ type: 'saveImage', id, name: file.name, mime: file.type, data });
-  return saved;
+  vscode.postMessage({ type: 'saveImage', id, ...file });
+  return new Promise<string>((resolve) => pendingUploads.set(id, resolve));
 }
 
 function getView(): EditorView {
@@ -67,22 +69,28 @@ async function insertImages(files: File[]): Promise<void> {
   }
 }
 
-// Opens the drawing surface for a new drawing (inserted at the cursor) or an existing one (src + getPos).
-// Every save writes a new file, so undo keeps working; unlinked files are cleaned up on close.
-async function drawLocally(src?: string): Promise<string | null> {
-  const svg = await openDrawingEditor(src ? await loadStrokes(resolveUrl(src)) : []);
-  return svg && uploadImage(new File([svg], `handwriting${DRAWING_SUFFIX}`, { type: 'image/svg+xml' }));
+async function drawLocally(drawing: Drawing): Promise<string | null> {
+  const result = await openDrawingEditor(drawing);
+  return result && saveFile(drawingFile(result));
 }
 
 // The extension sends the drawing to the iPad and saves the result.
-function drawOnIpad(src?: string): Promise<string | null> {
+function drawOnIpad(drawing: Drawing): Promise<string | null> {
   const id = ++uploadCounter;
-  vscode.postMessage({ type: 'drawRemote', id, src });
+  vscode.postMessage({ type: 'drawRemote', id, drawing });
   return new Promise((resolve) => pendingDrawings.set(id, resolve));
 }
 
-async function editDrawing(src?: string, getPos?: () => number | undefined): Promise<void> {
-  const path = drawingDevice === 'ipad' ? await drawOnIpad(src) : await drawLocally(src);
+// Opens the drawing surface for a new drawing (inserted at the cursor), an existing one or an image
+// to draw on (src + getPos; `width` = displayed width, `nodeWidth` = width attr). Every save writes
+// a new file, so undo keeps working; unlinked files are cleaned up on close.
+async function editDrawing(src?: string, getPos?: () => number | undefined, width?: number, nodeWidth?: number): Promise<void> {
+  const drawing: Drawing = !src
+    ? { strokes: [] }
+    : isDrawing(src)
+      ? await loadDrawing(resolveUrl(src))
+      : await imageDrawing(resolveUrl(src), width!, nodeWidth!);
+  const path = drawingDevice === 'ipad' ? await drawOnIpad(drawing) : await drawLocally(drawing);
   if (!path) {
     getView().focus();
     return;
@@ -92,7 +100,15 @@ async function editDrawing(src?: string, getPos?: () => number | undefined): Pro
     crepe!.editor.action(insert(`![](${path})`));
   } else {
     const view = getView();
-    view.dispatch(view.state.tr.setNodeAttribute(pos, 'src', path));
+    const tr = view.state.tr.setNodeAttribute(pos, 'src', path);
+    // Image → drawing: the image keeps its scale inside it, so the drawing is shown at its own size.
+    // Drawing → plain image (all strokes erased): the image gets its original width back.
+    if (!isDrawing(path)) {
+      tr.setNodeAttribute(pos, 'width', drawing.image!.nodeWidth ?? 0);
+    } else if (!isDrawing(src!)) {
+      tr.setNodeAttribute(pos, 'width', 0);
+    }
+    view.dispatch(tr);
   }
   getView().focus();
 }

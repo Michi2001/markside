@@ -3,7 +3,7 @@ import * as os from 'os';
 import * as vscode from 'vscode';
 
 // Serves the drawing page (dist/ipad.js) to an iPad in the local network. The page listens for
-// drawing requests via server-sent events and posts the finished SVG back. All URLs live under
+// drawing requests via server-sent events and posts the finished file back. All URLs live under
 // a secret token, so other devices in the network can't use the server.
 
 const FILES: Record<string, string> = {
@@ -29,7 +29,10 @@ const PAGE = `<!DOCTYPE html>
 </body>
 </html>`;
 
-type Pending = { id: number; svg: string | null; resolve: (svg: string | null) => void };
+// `drawing` is the webview's Drawing (strokes + optional background image), passed through as is.
+// `file` is the drawing (or restored image) to save: name, mime and base64 data.
+export type DrawingFile = { name: string; mime: string; data: string };
+type Pending = { id: number; drawing: unknown; resolve: (file: DrawingFile | null) => void };
 
 export function getDrawingDevice(): string {
   return vscode.workspace.getConfiguration('mdLive').get<string>('drawingDevice', 'mac');
@@ -89,7 +92,7 @@ export class DrawingServer implements vscode.Disposable {
   }
 
   // Opens the drawing surface on the iPad and waits for the result (null = cancelled/empty).
-  draw(svg: string | null): Promise<string | null> {
+  draw(drawing: unknown): Promise<DrawingFile | null> {
     this.start();
     const title = this.clients.size > 0 ? 'Drawing on the iPad …' : `Waiting for the iPad – open ${this.urls()[0]} there`;
     return Promise.resolve(
@@ -97,18 +100,18 @@ export class DrawingServer implements vscode.Disposable {
         { location: vscode.ProgressLocation.Notification, title, cancellable: true },
         (_progress, cancel) => {
           cancel.onCancellationRequested(() => this.cancel());
-          return this.request(svg);
+          return this.request(drawing);
         },
       ),
     );
   }
 
-  private request(svg: string | null): Promise<string | null> {
+  private request(drawing: unknown): Promise<DrawingFile | null> {
     this.cancel();
     return new Promise((resolve) => {
       const id = this.nextId++;
-      this.pending = { id, svg, resolve };
-      this.broadcast('draw', { id, svg });
+      this.pending = { id, drawing, resolve };
+      this.broadcast('draw', { id, drawing });
     });
   }
 
@@ -147,21 +150,21 @@ export class DrawingServer implements vscode.Disposable {
       this.clients.add(res);
       req.on('close', () => this.clients.delete(res));
       if (this.pending) {
-        this.broadcast('draw', { id: this.pending.id, svg: this.pending.svg }, [res]);
+        this.broadcast('draw', { id: this.pending.id, drawing: this.pending.drawing }, [res]);
       }
     } else if (route === 'result' && req.method === 'POST') {
       const chunks: Buffer[] = [];
       for await (const chunk of req) {
         chunks.push(chunk as Buffer);
       }
-      const { id, svg } = JSON.parse(Buffer.concat(chunks).toString('utf8'));
+      const { id, file } = JSON.parse(Buffer.concat(chunks).toString('utf8'));
       res.writeHead(204).end();
       const pending = this.pending;
       if (pending && pending.id === id) {
         this.pending = undefined;
         // Closes the canvas on other open iPad pages.
         this.broadcast('cancel', { id });
-        pending.resolve(svg);
+        pending.resolve(file);
       }
     } else {
       res.writeHead(404).end();

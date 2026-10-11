@@ -3,6 +3,9 @@ import './drawing.css';
 // Handwritten drawings are saved as `<timestamp>.drawing.svg`; the strokes are embedded as JSON
 // in <metadata>, so the drawing renders anywhere and can be reopened for editing.
 export const DRAWING_SUFFIX = '.drawing.svg';
+// Drawings on top of an image embed it (data URL) and get a white background; they are not
+// inverted in dark themes, so the image keeps its colors.
+const IMAGE_DRAWING_SUFFIX = '.image.drawing.svg';
 
 // Empty space kept around the strokes when cropping on save.
 const PADDING = 12;
@@ -33,6 +36,13 @@ type Stroke = {
   highlighter?: boolean;
   points: number[][]; // [x, y, pressure]
 };
+
+// Fixed background image in world coordinates (drawing on a picture).
+// `nodeWidth` is the image's width attr in the note, restored when all strokes are removed.
+type Background = { href: string; x: number; y: number; width: number; height: number; nodeWidth: number };
+export type Drawing = { strokes: Stroke[]; image?: Background };
+// A file for `saveImage` (base64 data).
+export type DrawingFile = { name: string; mime: string; data: string };
 
 type Tool = 'pen' | 'highlighter' | 'eraser' | 'lasso' | 'space' | 'shape';
 type Ink = 'pen' | 'highlighter';
@@ -79,21 +89,52 @@ export function isDrawing(src: string): boolean {
   return src.toLowerCase().endsWith(DRAWING_SUFFIX);
 }
 
+export function hasBackground(src: string): boolean {
+  return src.toLowerCase().endsWith(IMAGE_DRAWING_SUFFIX);
+}
+
+// The SVG, or the plain background image again once all strokes are gone (no white border).
+export function drawingFile({ strokes, image }: Drawing): DrawingFile {
+  if (strokes.length === 0 && image) {
+    const [, mime, data] = /^data:([^;,]+);base64,(.*)$/.exec(image.href)!;
+    return { name: 'image', mime, data };
+  }
+  // The SVG is pure ASCII (numbers, hex colors, base64).
+  return { name: `handwriting${image ? IMAGE_DRAWING_SUFFIX : DRAWING_SUFFIX}`, mime: 'image/svg+xml', data: btoa(toSvg(strokes, image)) };
+}
+
 export function isDrawingOpen(): boolean {
   return open;
 }
 
-export function parseStrokes(svg: string): Stroke[] {
+function parseDrawing(svg: string): Drawing {
   const json = /<metadata id="mdlive-drawing">([\s\S]*?)<\/metadata>/.exec(svg)?.[1];
   if (!json) {
     console.warn('No drawing data in SVG');
-    return [];
+    return { strokes: [] };
   }
-  return JSON.parse(json).strokes;
+  const { strokes, image } = JSON.parse(json);
+  const href = /<image id="mdlive-background"[^>]*\shref="([^"]*)"/.exec(svg)?.[1];
+  return { strokes, ...(image && href ? { image: { ...image, href } } : {}) };
 }
 
-export async function loadStrokes(url: string): Promise<Stroke[]> {
-  return parseStrokes(await (await fetch(url)).text());
+export async function loadDrawing(url: string): Promise<Drawing> {
+  return parseDrawing(await (await fetch(url)).text());
+}
+
+// A new drawing on top of an image, shown `width` px wide (as in the note).
+export async function imageDrawing(url: string, width: number, nodeWidth: number): Promise<Drawing> {
+  const blob = await (await fetch(url)).blob();
+  const href = await new Promise<string>((resolve) => {
+    const reader = new FileReader();
+    reader.onload = () => resolve(reader.result as string);
+    reader.readAsDataURL(blob);
+  });
+  const img = new Image();
+  img.src = href;
+  await img.decode();
+  const w = Math.round(width);
+  return { strokes: [], image: { href, x: 0, y: 0, width: w, height: Math.round((img.naturalHeight * w) / img.naturalWidth), nodeWidth } };
 }
 
 // A stroke is drawn as round-capped polylines, one per run of equal width; the same runs are used
@@ -136,12 +177,26 @@ function translate(stroke: Stroke, dx: number, dy: number): Stroke {
   return { ...stroke, points: stroke.points.map(([x, y, p]) => [round(x + dx), round(y + dy), p]) };
 }
 
-// Cropped to the strokes: they are moved so the bounding box starts at PADDING.
-function toSvg(strokes: Stroke[]): string {
-  const box = bounds(strokes);
-  const moved = paintOrder(strokes).map((s) => translate(s, PADDING - box.x1, PADDING - box.y1));
-  const width = Math.ceil(box.x2 - box.x1 + 2 * PADDING);
-  const height = Math.ceil(box.y2 - box.y1 + 2 * PADDING);
+// Cropped to the strokes (and image): they are moved so the bounding box starts at PADDING.
+// On an image whose strokes all lie inside it, the SVG is exactly the image: no padding, no white border.
+function toSvg(strokes: Stroke[], image?: Background): string {
+  const imageBox = image && { x1: image.x, y1: image.y, x2: image.x + image.width, y2: image.y + image.height };
+  const inside =
+    imageBox && strokes.every((s) => s.points.every(([x, y]) => x >= imageBox.x1 && x <= imageBox.x2 && y >= imageBox.y1 && y <= imageBox.y2));
+  const boxes = [...(strokes.length > 0 ? [bounds(strokes)] : []), ...(imageBox ? [imageBox] : [])];
+  const box = inside
+    ? imageBox
+    : {
+        x1: Math.min(...boxes.map((b) => b.x1)),
+        y1: Math.min(...boxes.map((b) => b.y1)),
+        x2: Math.max(...boxes.map((b) => b.x2)),
+        y2: Math.max(...boxes.map((b) => b.y2)),
+      };
+  const pad = inside ? 0 : PADDING;
+  const moved = paintOrder(strokes).map((s) => translate(s, pad - box.x1, pad - box.y1));
+  const placed = image && { x: Number((image.x + pad - box.x1).toFixed(1)), y: Number((image.y + pad - box.y1).toFixed(1)), width: image.width, height: image.height, nodeWidth: image.nodeWidth };
+  const width = Math.ceil(box.x2 - box.x1 + 2 * pad);
+  const height = Math.ceil(box.y2 - box.y1 + 2 * pad);
   const paths = moved
     .map((s) => {
       const opacity = s.highlighter ? ` stroke-opacity="${HIGHLIGHTER_OPACITY}"` : '';
@@ -150,8 +205,8 @@ function toSvg(strokes: Stroke[]): string {
     })
     .join('\n');
   return `<svg xmlns="http://www.w3.org/2000/svg" width="${width}" height="${height}" viewBox="0 0 ${width} ${height}">
-<metadata id="mdlive-drawing">${JSON.stringify({ version: 1, strokes: moved })}</metadata>
-${paths}
+<metadata id="mdlive-drawing">${JSON.stringify({ version: 1, strokes: moved, ...(placed ? { image: placed } : {}) })}</metadata>
+${placed ? `${inside ? '' : '<rect width="100%" height="100%" fill="#fff"/>\n'}<image id="mdlive-background" x="${placed.x}" y="${placed.y}" width="${placed.width}" height="${placed.height}" preserveAspectRatio="none" href="${image!.href}"/>\n` : ''}${paths}
 </svg>
 `;
 }
@@ -304,10 +359,12 @@ function separator(): HTMLElement {
 // Opens a full-window, infinite drawing surface. The canvas always covers the visible area and
 // is redrawn with the view offset and zoom; scrolling only moves the view (wheel/trackpad on the
 // Mac, one finger on the iPad), zooming only scales it (pinch, Ctrl+wheel). Saved sizes don't change.
-// Resolves with the SVG, or null if cancelled (also via `signal`) or empty.
-export function openDrawingEditor(initial: Stroke[], signal?: AbortSignal): Promise<string | null> {
+// With a background image the surface is white and the image lies fixed under the strokes.
+// Resolves with the drawing, or null if cancelled (also via `signal`) or empty.
+export function openDrawingEditor(initial: Drawing, signal?: AbortSignal): Promise<Drawing | null> {
   open = true;
-  let strokes = initial;
+  let strokes = initial.strokes;
+  const image = initial.image;
   const undoStack: Stroke[][] = [];
   const redoStack: Stroke[][] = [];
   let tool: Tool = 'pen';
@@ -329,7 +386,7 @@ export function openDrawingEditor(initial: Stroke[], signal?: AbortSignal): Prom
   // Active finger touches (screen coordinates): one pans, two pinch-zoom.
   const touches = new Map<number, { x: number; y: number }>();
   // World coordinates of the canvas' top-left corner; screen = (world - view) * zoom.
-  let viewX = initial.length > 0 ? -VIEW_MARGIN : 0;
+  let viewX = strokes.length > 0 || image ? -VIEW_MARGIN : 0;
   let viewY = viewX;
   let zoom = 1;
 
@@ -340,11 +397,13 @@ export function openDrawingEditor(initial: Stroke[], signal?: AbortSignal): Prom
   const stage = document.createElement('div');
   stage.className = 'mdlive-drawing-stage';
   const canvas = document.createElement('canvas');
-  canvas.className = 'mdlive-ink';
+  // Ink is inverted in dark themes, but not on top of an image.
+  canvas.className = image ? '' : 'mdlive-ink';
   stage.append(canvas);
   overlay.append(toolbar, stage);
   document.body.append(overlay);
   const ctx = canvas.getContext('2d')!;
+  const background = image && new Image();
 
   const selectionBox = (): ReturnType<typeof bounds> | null => {
     if (selection.size === 0) {
@@ -380,6 +439,10 @@ export function openDrawingEditor(initial: Stroke[], signal?: AbortSignal): Prom
     const { width, height } = stage.getBoundingClientRect();
     ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
     ctx.clearRect(0, 0, width, height);
+    if (image) {
+      ctx.fillStyle = '#fff';
+      ctx.fillRect(0, 0, width, height);
+    }
     ctx.beginPath();
     for (let gx = Math.floor(viewX / GRID) * GRID; (gx - viewX) * zoom < width; gx += GRID) {
       ctx.rect(Math.round((gx - viewX) * zoom), 0, 1, height);
@@ -391,6 +454,9 @@ export function openDrawingEditor(initial: Stroke[], signal?: AbortSignal): Prom
     ctx.fill();
     ctx.scale(zoom, zoom);
     ctx.translate(-viewX, -viewY);
+    if (image && background!.naturalWidth > 0) {
+      ctx.drawImage(background!, image.x, image.y, image.width, image.height);
+    }
     for (const stroke of paintOrder(strokes)) {
       const moving = selection.has(stroke);
       if (moving) {
@@ -440,6 +506,10 @@ export function openDrawingEditor(initial: Stroke[], signal?: AbortSignal): Prom
     canvas.height = Math.round(height * dpr);
     redraw();
   };
+  if (background) {
+    background.onload = redraw;
+    background.src = image.href;
+  }
   const observer = new ResizeObserver(resize);
   observer.observe(stage);
 
@@ -604,13 +674,13 @@ export function openDrawingEditor(initial: Stroke[], signal?: AbortSignal): Prom
 
   // ---------- Toolbar ----------
 
-  let resolve: (svg: string | null) => void;
-  const result = new Promise<string | null>((r) => (resolve = r));
-  const finish = (svg: string | null): void => {
+  let resolve: (drawing: Drawing | null) => void;
+  const result = new Promise<Drawing | null>((r) => (resolve = r));
+  const finish = (drawing: Drawing | null): void => {
     open = false;
     observer.disconnect();
     overlay.remove();
-    resolve(svg);
+    resolve(drawing);
   };
   signal?.addEventListener('abort', () => finish(null));
 
@@ -790,7 +860,7 @@ export function openDrawingEditor(initial: Stroke[], signal?: AbortSignal): Prom
     shapeButton,
     spacer,
     button('mdlive-text', 'Discard changes', 'Cancel', () => finish(null)),
-    button('mdlive-text primary', 'Save drawing', 'Done', () => finish(strokes.length > 0 ? toSvg(strokes) : null)),
+    button('mdlive-text primary', 'Save drawing', 'Done', () => finish(strokes.length > 0 || image ? { strokes, image } : null)),
   );
   updateToolbar();
 

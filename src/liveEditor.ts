@@ -13,7 +13,7 @@ type WebviewMessage =
   | { type: 'edit'; text: string }
   | { type: 'saveImage'; id: number; name: string; mime: string; data: string }
   | { type: 'selection'; text: string }
-  | { type: 'drawRemote'; id: number; src?: string };
+  | { type: 'drawRemote'; id: number; drawing: unknown };
 
 export class LiveEditorProvider implements vscode.CustomTextEditorProvider {
   static readonly viewType = 'mdLive.editor';
@@ -125,12 +125,8 @@ export class LiveEditorProvider implements vscode.CustomTextEditorProvider {
           break;
         }
         case 'drawRemote': {
-          // src is the relative, URI-encoded link from the note.
-          const old = msg.src
-            ? new TextDecoder().decode(await vscode.workspace.fs.readFile(vscode.Uri.joinPath(docDir, ...msg.src.split('/').map(decodeURIComponent))))
-            : null;
-          const svg = await this.drawingServer.draw(old);
-          const path = svg ? await saveImage(document.uri, 'handwriting.drawing.svg', 'image/svg+xml', Buffer.from(svg).toString('base64')) : null;
+          const file = await this.drawingServer.draw(msg.drawing);
+          const path = file ? await saveImage(document.uri, file.name, file.mime, file.data) : null;
           panel.webview.postMessage({ type: 'drawingSaved', id: msg.id, path });
           break;
         }

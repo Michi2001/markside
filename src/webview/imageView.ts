@@ -2,12 +2,12 @@ import type { RemarkPlugin } from '@milkdown/kit/transformer';
 import type { Ctx } from '@milkdown/kit/ctx';
 import type { Node as ProseNode } from '@milkdown/kit/prose/model';
 import type { EditorView, NodeView, NodeViewConstructor } from '@milkdown/kit/prose/view';
-import { isDrawing } from './drawing';
+import { hasBackground, isDrawing } from './drawing';
 
 const MIN_WIDTH = 40;
 const CORNERS = ['nw', 'ne', 'sw', 'se'] as const;
 
-type EditDrawing = (src: string, getPos: () => number | undefined) => void;
+type EditDrawing = (src: string, getPos: () => number | undefined, width: number, nodeWidth: number) => void;
 
 type MdNode = { type: string; children?: MdNode[]; value?: string; [key: string]: unknown };
 type NodeSpecFactory = (ctx: Ctx) => any;
@@ -103,6 +103,10 @@ export function extendImageBlockSchema(prev: NodeSpecFactory): NodeSpecFactory {
 
 // ---------- Resizable node view ----------
 
+function isExternal(src: string): boolean {
+  return /^([a-z][a-z0-9+.-]*:|\/\/)/i.test(src);
+}
+
 class ResizableImageView implements NodeView {
   dom: HTMLElement;
   private img: HTMLImageElement;
@@ -132,8 +136,9 @@ class ResizableImageView implements NodeView {
     }
     this.dom.append(wrapper);
     this.dom.addEventListener('dblclick', () => {
-      if (isDrawing(this.node.attrs.src)) {
-        editDrawing(this.node.attrs.src, this.getPos);
+      // Drawings are reopened, local images become the background of a new drawing.
+      if (isDrawing(this.node.attrs.src) || !isExternal(this.node.attrs.src)) {
+        editDrawing(this.node.attrs.src, this.getPos, this.img.getBoundingClientRect().width, this.node.attrs.width);
       }
     });
     this.render();
@@ -146,8 +151,8 @@ class ResizableImageView implements NodeView {
       this.img.src = url;
     }
     this.img.alt = alt;
-    this.img.classList.toggle('mdlive-ink', isDrawing(src));
-    this.img.title = isDrawing(src) ? 'Double-click to edit' : '';
+    this.img.classList.toggle('mdlive-ink', isDrawing(src) && !hasBackground(src));
+    this.img.title = isDrawing(src) ? 'Double-click to edit' : isExternal(src) ? '' : 'Double-click to draw on it';
     this.img.style.width = width > 0 ? `${width}px` : '';
   }
 
