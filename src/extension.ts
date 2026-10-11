@@ -1,9 +1,21 @@
+import * as crypto from 'crypto';
 import * as vscode from 'vscode';
 import { registerAssetSync } from './assets';
+import { DrawingServer, getDrawingDevice } from './drawingServer';
 import { LiveEditorProvider } from './liveEditor';
 
 export function activate(context: vscode.ExtensionContext): void {
-  const provider = new LiveEditorProvider(context.extensionUri);
+  // Persisted so the URL bookmarked on the iPad stays valid.
+  let token = context.globalState.get<string>('ipadToken');
+  if (!token) {
+    token = crypto.randomBytes(16).toString('hex');
+    context.globalState.update('ipadToken', token);
+  }
+  const drawingServer = new DrawingServer(vscode.Uri.joinPath(context.extensionUri, 'dist'), token);
+  // Runs while drawings go to the iPad, so the page there can stay connected.
+  const syncServer = (): void => (getDrawingDevice() === 'ipad' ? drawingServer.start() : drawingServer.stop());
+  syncServer();
+  const provider = new LiveEditorProvider(context.extensionUri, drawingServer);
 
   context.subscriptions.push(
     vscode.window.registerCustomEditorProvider(LiveEditorProvider.viewType, provider, {
@@ -16,11 +28,33 @@ export function activate(context: vscode.ExtensionContext): void {
       switchEditor(uri, 'default'),
     ),
     vscode.commands.registerCommand('mdLive.sendSelectionToClaude', () =>
-      provider.requestSelectionFromActivePanel(),
+      provider.postToActivePanel('requestSelection'),
     ),
+    vscode.commands.registerCommand('mdLive.insertDrawing', () => provider.postToActivePanel('insertDrawing')),
     vscode.commands.registerCommand('mdLive.chooseTheme', chooseTheme),
+    vscode.commands.registerCommand('mdLive.showIpadUrl', () => showIpadUrl(drawingServer)),
+    vscode.workspace.onDidChangeConfiguration((e) => {
+      if (e.affectsConfiguration('mdLive.drawingDevice') || e.affectsConfiguration('mdLive.ipadPort')) {
+        drawingServer.stop();
+        syncServer();
+      }
+    }),
+    drawingServer,
     registerAssetSync(),
   );
+}
+
+async function showIpadUrl(server: DrawingServer): Promise<void> {
+  if (getDrawingDevice() !== 'ipad') {
+    await vscode.workspace.getConfiguration('mdLive').update('drawingDevice', 'ipad', vscode.ConfigurationTarget.Global);
+  }
+  const url = await vscode.window.showQuickPick(server.urls(), {
+    placeHolder: 'Copy the address for the iPad (the .local name keeps working when the IP changes)',
+  });
+  if (url) {
+    await vscode.env.clipboard.writeText(url);
+    vscode.window.showInformationMessage(`Copied ${url} – open it in Safari on the iPad (Universal Clipboard: just paste there).`);
+  }
 }
 
 export function deactivate(): void {}

@@ -2,9 +2,12 @@ import type { RemarkPlugin } from '@milkdown/kit/transformer';
 import type { Ctx } from '@milkdown/kit/ctx';
 import type { Node as ProseNode } from '@milkdown/kit/prose/model';
 import type { EditorView, NodeView, NodeViewConstructor } from '@milkdown/kit/prose/view';
+import { isDrawing } from './drawing';
 
 const MIN_WIDTH = 40;
 const CORNERS = ['nw', 'ne', 'sw', 'se'] as const;
+
+type EditDrawing = (src: string, getPos: () => number | undefined) => void;
 
 type MdNode = { type: string; children?: MdNode[]; value?: string; [key: string]: unknown };
 type NodeSpecFactory = (ctx: Ctx) => any;
@@ -110,6 +113,7 @@ class ResizableImageView implements NodeView {
     private view: EditorView,
     private getPos: () => number | undefined,
     private resolveUrl: (url: string) => string,
+    editDrawing: EditDrawing,
   ) {
     this.dom = document.createElement('div');
     this.dom.className = 'mdlive-image';
@@ -127,6 +131,11 @@ class ResizableImageView implements NodeView {
       wrapper.append(handle);
     }
     this.dom.append(wrapper);
+    this.dom.addEventListener('dblclick', () => {
+      if (isDrawing(this.node.attrs.src)) {
+        editDrawing(this.node.attrs.src, this.getPos);
+      }
+    });
     this.render();
   }
 
@@ -137,6 +146,8 @@ class ResizableImageView implements NodeView {
       this.img.src = url;
     }
     this.img.alt = alt;
+    this.img.classList.toggle('mdlive-ink', isDrawing(src));
+    this.img.title = isDrawing(src) ? 'Double-click to edit' : '';
     this.img.style.width = width > 0 ? `${width}px` : '';
   }
 
@@ -198,10 +209,14 @@ class ResizableImageView implements NodeView {
 }
 
 // Uses our resizable view for images; empty image blocks keep Crepe's upload placeholder.
-export function createImageBlockView(crepeView: NodeViewConstructor, resolveUrl: (url: string) => string): NodeViewConstructor {
+export function createImageBlockView(
+  crepeView: NodeViewConstructor,
+  resolveUrl: (url: string) => string,
+  editDrawing: EditDrawing,
+): NodeViewConstructor {
   return (node, view, getPos, decorations, innerDecorations) => {
     if (node.attrs.src) {
-      return new ResizableImageView(node, view, getPos, resolveUrl);
+      return new ResizableImageView(node, view, getPos, resolveUrl, editDrawing);
     }
     const placeholder = crepeView(node, view, getPos, decorations, innerDecorations);
     const update = placeholder.update?.bind(placeholder);

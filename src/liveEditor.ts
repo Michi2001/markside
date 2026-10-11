@@ -1,5 +1,6 @@
 import * as vscode from 'vscode';
 import { adoptAssets, cleanupAssets, saveImage } from './assets';
+import { DrawingServer, getDrawingDevice } from './drawingServer';
 
 const CLAUDE_MENTION_COMMAND = 'claude-vscode.insertAtMention';
 
@@ -11,7 +12,8 @@ type WebviewMessage =
   | { type: 'ready' }
   | { type: 'edit'; text: string }
   | { type: 'saveImage'; id: number; name: string; mime: string; data: string }
-  | { type: 'selection'; text: string };
+  | { type: 'selection'; text: string }
+  | { type: 'drawRemote'; id: number; src?: string };
 
 export class LiveEditorProvider implements vscode.CustomTextEditorProvider {
   static readonly viewType = 'mdLive.editor';
@@ -20,14 +22,17 @@ export class LiveEditorProvider implements vscode.CustomTextEditorProvider {
   // Open panels per document; assets are cleaned up when the last one closes.
   private readonly panelCounts = new Map<string, number>();
 
-  constructor(private readonly extensionUri: vscode.Uri) {}
+  constructor(
+    private readonly extensionUri: vscode.Uri,
+    private readonly drawingServer: DrawingServer,
+  ) {}
 
-  requestSelectionFromActivePanel(): void {
+  postToActivePanel(type: 'requestSelection' | 'insertDrawing'): void {
     if (!this.activePanel) {
       vscode.window.showWarningMessage('No Markdown Live Editor is active.');
       return;
     }
-    this.activePanel.webview.postMessage({ type: 'requestSelection' });
+    this.activePanel.webview.postMessage({ type });
   }
 
   async resolveCustomTextEditor(
@@ -68,6 +73,9 @@ export class LiveEditorProvider implements vscode.CustomTextEditorProvider {
       if (e.affectsConfiguration('mdLive.theme')) {
         panel.webview.postMessage({ type: 'theme', theme: getTheme() });
       }
+      if (e.affectsConfiguration('mdLive.drawingDevice')) {
+        panel.webview.postMessage({ type: 'drawingDevice', device: getDrawingDevice() });
+      }
     });
 
     panel.onDidChangeViewState(() => {
@@ -98,6 +106,7 @@ export class LiveEditorProvider implements vscode.CustomTextEditorProvider {
             text: document.getText(),
             baseUri: panel.webview.asWebviewUri(docDir).toString() + '/',
             theme: getTheme(),
+            drawingDevice: getDrawingDevice(),
           });
           break;
         case 'edit': {
@@ -113,6 +122,16 @@ export class LiveEditorProvider implements vscode.CustomTextEditorProvider {
         case 'saveImage': {
           const relPath = await saveImage(document.uri, msg.name, msg.mime, msg.data);
           panel.webview.postMessage({ type: 'imageSaved', id: msg.id, path: relPath });
+          break;
+        }
+        case 'drawRemote': {
+          // src is the relative, URI-encoded link from the note.
+          const old = msg.src
+            ? new TextDecoder().decode(await vscode.workspace.fs.readFile(vscode.Uri.joinPath(docDir, ...msg.src.split('/').map(decodeURIComponent))))
+            : null;
+          const svg = await this.drawingServer.draw(old);
+          const path = svg ? await saveImage(document.uri, 'handwriting.drawing.svg', 'image/svg+xml', Buffer.from(svg).toString('base64')) : null;
+          panel.webview.postMessage({ type: 'drawingSaved', id: msg.id, path });
           break;
         }
         case 'selection':
@@ -135,6 +154,8 @@ export class LiveEditorProvider implements vscode.CustomTextEditorProvider {
       `img-src ${webview.cspSource} https: http: data: blob:`,
       `style-src ${webview.cspSource} 'unsafe-inline'`,
       `font-src ${webview.cspSource} data:`,
+      // Drawings are fetched to read their embedded strokes.
+      `connect-src ${webview.cspSource}`,
       `script-src 'nonce-${nonce}'`,
     ].join('; ');
     return `<!DOCTYPE html>

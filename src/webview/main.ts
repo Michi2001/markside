@@ -1,10 +1,12 @@
 import { Crepe } from '@milkdown/crepe';
 import '@milkdown/crepe/theme/common/style.css';
 import { imageBlockSchema } from '@milkdown/kit/component/image-block';
-import { editorViewCtx, remarkPluginsCtx, remarkStringifyOptionsCtx } from '@milkdown/kit/core';
+import { commandsCtx, editorViewCtx, remarkPluginsCtx, remarkStringifyOptionsCtx } from '@milkdown/kit/core';
+import { clearTextInCurrentBlockCommand } from '@milkdown/kit/preset/commonmark';
 import { type EditorState, TextSelection } from '@milkdown/kit/prose/state';
 import type { EditorView } from '@milkdown/kit/prose/view';
 import { callCommand, insert, replaceAll } from '@milkdown/kit/utils';
+import { DRAWING_SUFFIX, isDrawingOpen, loadStrokes, openDrawingEditor } from './drawing';
 import { createImageBlockView, extendImageBlockSchema, remarkHtmlImages } from './imageView';
 import { highlight } from './highlight';
 import { setHeading, shiftHeading } from './headings';
@@ -22,6 +24,9 @@ let baseUri = '';
 let lastSynced = '';
 let uploadCounter = 0;
 const pendingUploads = new Map<number, (path: string) => void>();
+const pendingDrawings = new Map<number, (path: string | null) => void>();
+// Setting mdLive.drawingDevice: draw in this webview ('mac') or on the iPad page ('ipad').
+let drawingDevice = 'mac';
 
 // Relative image paths in the note are resolved against the note's folder (as a webview URI).
 function resolveUrl(url: string): string {
@@ -62,6 +67,39 @@ async function insertImages(files: File[]): Promise<void> {
   }
 }
 
+// Opens the drawing surface for a new drawing (inserted at the cursor) or an existing one (src + getPos).
+// Every save writes a new file, so undo keeps working; unlinked files are cleaned up on close.
+async function drawLocally(src?: string): Promise<string | null> {
+  const svg = await openDrawingEditor(src ? await loadStrokes(resolveUrl(src)) : []);
+  return svg && uploadImage(new File([svg], `handwriting${DRAWING_SUFFIX}`, { type: 'image/svg+xml' }));
+}
+
+// The extension sends the drawing to the iPad and saves the result.
+function drawOnIpad(src?: string): Promise<string | null> {
+  const id = ++uploadCounter;
+  vscode.postMessage({ type: 'drawRemote', id, src });
+  return new Promise((resolve) => pendingDrawings.set(id, resolve));
+}
+
+async function editDrawing(src?: string, getPos?: () => number | undefined): Promise<void> {
+  const path = drawingDevice === 'ipad' ? await drawOnIpad(src) : await drawLocally(src);
+  if (!path) {
+    getView().focus();
+    return;
+  }
+  const pos = getPos?.();
+  if (pos === undefined) {
+    crepe!.editor.action(insert(`![](${path})`));
+  } else {
+    const view = getView();
+    view.dispatch(view.state.tr.setNodeAttribute(pos, 'src', path));
+  }
+  getView().focus();
+}
+
+const PEN_ICON =
+  '<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" width="24" height="24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M4 20l1-4L16 5l3 3L8 19z"/><path d="M14 7l3 3"/></svg>';
+
 // Inside a bullet list the shortcuts act on the whole text of the touched items, even if only part
 // of it (or nothing) is selected. Returns null outside lists.
 function listItemRange(state: EditorState): { from: number; to: number } | null {
@@ -85,6 +123,18 @@ async function createEditor(text: string): Promise<void> {
     defaultValue: text,
     featureConfigs: {
       [Crepe.Feature.ImageBlock]: { onUpload: uploadImage, proxyDomURL: resolveUrl },
+      [Crepe.Feature.BlockEdit]: {
+        buildMenu: (builder) => {
+          builder.getGroup('advanced').addItem('handwriting', {
+            label: 'Handwriting',
+            icon: PEN_ICON,
+            onRun: (ctx) => {
+              ctx.get(commandsCtx).call(clearTextInCurrentBlockCommand.key);
+              editDrawing();
+            },
+          });
+        },
+      },
     },
   });
   crepe.editor.config((ctx) => {
@@ -106,7 +156,7 @@ async function createEditor(text: string): Promise<void> {
   const view = getView();
   const crepeImageView = view.props.nodeViews!['image-block'];
   view.setProps({
-    nodeViews: { ...view.props.nodeViews, 'image-block': createImageBlockView(crepeImageView, resolveUrl) },
+    nodeViews: { ...view.props.nodeViews, 'image-block': createImageBlockView(crepeImageView, resolveUrl, editDrawing) },
   });
   lastSynced = crepe.getMarkdown();
 }
@@ -197,6 +247,9 @@ function runFormatCommand(command: string, payload?: unknown): void {
 window.addEventListener(
   'keydown',
   (e) => {
+    if (isDrawingOpen()) {
+      return;
+    }
     const inCodeBlock = (e.target as HTMLElement).closest?.('.cm-editor');
     if (e.key === 'Tab' && !e.altKey && !e.metaKey && !e.ctrlKey && crepe && !inCodeBlock) {
       const view = getView();
@@ -214,6 +267,10 @@ window.addEventListener(
       e.preventDefault();
       e.stopPropagation();
       sendSelection();
+    } else if (e.code === 'KeyD') {
+      e.preventDefault();
+      e.stopPropagation();
+      editDrawing();
     } else if (command) {
       e.preventDefault();
       e.stopPropagation();
@@ -238,6 +295,7 @@ window.addEventListener('message', async (event) => {
     case 'init':
       baseUri = msg.baseUri;
       document.body.dataset.theme = msg.theme;
+      drawingDevice = msg.drawingDevice;
       await createEditor(msg.text);
       break;
     case 'update':
@@ -250,12 +308,24 @@ window.addEventListener('message', async (event) => {
     case 'theme':
       document.body.dataset.theme = msg.theme;
       break;
+    case 'drawingDevice':
+      drawingDevice = msg.device;
+      break;
+    case 'drawingSaved':
+      pendingDrawings.get(msg.id)?.(msg.path);
+      pendingDrawings.delete(msg.id);
+      break;
     case 'imageSaved':
       pendingUploads.get(msg.id)?.(msg.path);
       pendingUploads.delete(msg.id);
       break;
     case 'requestSelection':
       sendSelection();
+      break;
+    case 'insertDrawing':
+      if (crepe && !isDrawingOpen()) {
+        editDrawing();
+      }
       break;
   }
 });

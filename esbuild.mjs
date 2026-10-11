@@ -25,6 +25,16 @@ const configs = [
     loader: { '.woff': 'file', '.woff2': 'file', '.ttf': 'file' },
     assetNames: 'assets/[name]-[hash]',
   },
+  {
+    // Drawing page for the iPad, served by src/drawingServer.ts.
+    entryPoints: ['src/ipad/main.ts'],
+    bundle: true,
+    outfile: 'dist/ipad.js',
+    platform: 'browser',
+    format: 'iife',
+    target: 'safari16',
+    minify: !watch,
+  },
 ];
 
 if (watch) {

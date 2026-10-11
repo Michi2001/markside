@@ -1,0 +1,64 @@
+/* The drawing surface uses VS Code theme variables; the iPad page provides light values. */
+:root {
+  color-scheme: light;
+  --vscode-editor-background: #ffffff;
+  --vscode-editor-foreground: #3b3b3b;
+  --vscode-editorWidget-background: #f8f8f8;
+  --vscode-editorWidget-border: #dddddd;
+  --vscode-descriptionForeground: #6f6f6f;
+  --vscode-textLink-foreground: #005fb8;
+  --vscode-focusBorder: #005fb8;
+  --vscode-button-background: #005fb8;
+  --vscode-button-foreground: #ffffff;
+}
+
+/* Nothing on this page is text to select; a resting palm otherwise opens the copy/look-up menu. */
+* {
+  -webkit-user-select: none;
+  user-select: none;
+  -webkit-touch-callout: none;
+}
+
+html,
+body {
+  margin: 0;
+  height: 100%;
+  background: var(--vscode-editor-background);
+  color: var(--vscode-editor-foreground);
+  font-family: -apple-system, system-ui, sans-serif;
+  font-size: 17px;
+}
+
+#status {
+  padding: 40px 24px;
+  text-align: center;
+  color: var(--vscode-descriptionForeground);
+}
+
+/* Bigger touch targets for finger and Pencil. */
+.mdlive-drawing-toolbar .mdlive-tool {
+  width: 44px;
+  height: 44px;
+}
+
+.mdlive-drawing-toolbar {
+  height: 64px;
+}
+
+.mdlive-drawing-toolbar .mdlive-pen {
+  width: 30px;
+}
+
+.mdlive-drawing-toolbar .mdlive-pen svg {
+  height: 48px;
+}
+
+.mdlive-popover .mdlive-tool {
+  width: 48px;
+  height: 48px;
+}
+
+.mdlive-popover .mdlive-swatch {
+  width: 40px;
+  height: 40px;
+}

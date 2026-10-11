@@ -51,7 +51,10 @@ async function readText(uri: vscode.Uri): Promise<string> {
 export async function saveImage(note: vscode.Uri, name: string, mime: string, data: string): Promise<string> {
   const dir = assetsDir(note);
   await fs.createDirectory(dir);
-  const ext = path.extname(name).toLowerCase() || MIME_EXTENSIONS[mime] || '.png';
+  // Handwritten drawings keep their double extension so the webview can reopen them for editing.
+  const ext = name.toLowerCase().endsWith('.drawing.svg')
+    ? '.drawing.svg'
+    : path.extname(name).toLowerCase() || MIME_EXTENSIONS[mime] || '.png';
   const fileName = `${Date.now()}${ext}`;
   await fs.writeFile(vscode.Uri.joinPath(dir, fileName), Buffer.from(data, 'base64'));
   return assetsRef(note) + fileName;

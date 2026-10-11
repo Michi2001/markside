@@ -45,6 +45,17 @@
         "icon": "$(sparkle)"
       },
       {
+        "command": "mdLive.insertDrawing",
+        "title": "Insert Handwriting (Alt+D)",
+        "category": "Markdown Live",
+        "icon": "$(pencil)"
+      },
+      {
+        "command": "mdLive.showIpadUrl",
+        "title": "Draw on iPad: Show Address",
+        "category": "Markdown Live"
+      },
+      {
         "command": "mdLive.chooseTheme",
         "title": "Choose Color Mode",
         "category": "Markdown Live",
@@ -69,9 +80,14 @@
           "group": "navigation@2"
         },
         {
-          "command": "mdLive.chooseTheme",
+          "command": "mdLive.insertDrawing",
           "when": "activeCustomEditorId == mdLive.editor",
           "group": "navigation@3"
+        },
+        {
+          "command": "mdLive.chooseTheme",
+          "when": "activeCustomEditorId == mdLive.editor",
+          "group": "navigation@4"
         }
       ],
       "commandPalette": [
@@ -85,6 +101,10 @@
         },
         {
           "command": "mdLive.sendSelectionToClaude",
+          "when": "activeCustomEditorId == mdLive.editor"
+        },
+        {
+          "command": "mdLive.insertDrawing",
           "when": "activeCustomEditorId == mdLive.editor"
         },
         {
@@ -110,6 +130,24 @@
             "Always use a dark editor."
           ],
           "description": "Color mode of the Markdown Live Editor."
+        },
+        "mdLive.drawingDevice": {
+          "type": "string",
+          "enum": [
+            "mac",
+            "ipad"
+          ],
+          "default": "mac",
+          "enumDescriptions": [
+            "Draw in the editor window.",
+            "Draw on an iPad: open the address from 'Draw on iPad: Show Address' in Safari there (same network)."
+          ],
+          "description": "Where the handwriting canvas (Alt+D, double-click on a drawing) opens."
+        },
+        "mdLive.ipadPort": {
+          "type": "number",
+          "default": 8765,
+          "description": "Port of the local server for drawing on the iPad."
         }
       }
     }
