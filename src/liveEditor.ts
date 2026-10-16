@@ -14,12 +14,23 @@ function getFontSize(): number {
   return vscode.workspace.getConfiguration('mdLive').get<number>('fontSize', 16);
 }
 
+// Obsidian-style inline title: the file name with underscores shown as spaces.
+function noteTitle(note: vscode.Uri): string {
+  return note.path.split('/').pop()!.replace(/\.[^.]+$/, '').replace(/_/g, ' ');
+}
+
+// Title → file name: spaces become underscores, characters not allowed in file names become dashes.
+function titleToFileName(title: string): string {
+  return title.trim().replace(/\s+/g, '_').replace(/[\/\\:*?"<>|]/g, '-').replace(/^\.+/, '');
+}
+
 type WebviewMessage =
   | { type: 'ready' }
   | { type: 'edit'; text: string }
   | { type: 'saveImage'; id: number; name: string; mime: string; data: string }
   | { type: 'selection'; text: string }
   | { type: 'folds'; folds: Fold[] }
+  | { type: 'rename'; title: string }
   | { type: 'drawRemote'; id: number; drawing: unknown; src: string | null };
 
 export class LiveEditorProvider implements vscode.CustomTextEditorProvider {
@@ -117,6 +128,7 @@ export class LiveEditorProvider implements vscode.CustomTextEditorProvider {
             baseUri: panel.webview.asWebviewUri(docDir).toString() + '/',
             theme: getTheme(),
             fontSize: getFontSize(),
+            title: noteTitle(document.uri),
             drawingDevice: getDrawingDevice(),
             folds: await loadFolds(document.uri),
           });
@@ -137,6 +149,12 @@ export class LiveEditorProvider implements vscode.CustomTextEditorProvider {
           });
           break;
         }
+        case 'rename':
+          await editQueue;
+          if (!(await renameNote(document, msg.title))) {
+            panel.webview.postMessage({ type: 'title', title: noteTitle(document.uri) });
+          }
+          break;
         case 'saveImage': {
           const relPath = await saveImage(document.uri, msg.name, msg.mime, msg.data);
           panel.webview.postMessage({ type: 'imageSaved', id: msg.id, path: relPath });
@@ -181,6 +199,8 @@ export class LiveEditorProvider implements vscode.CustomTextEditorProvider {
   <link href="${styleUri}" rel="stylesheet">
 </head>
 <body>
+  <div id="titlebar"></div>
+  <h1 id="title" contenteditable="plaintext-only" spellcheck="false"></h1>
   <div id="editor"></div>
   <script nonce="${nonce}" src="${scriptUri}"></script>
 </body>
@@ -211,6 +231,32 @@ async function applyMinimalEdit(document: vscode.TextDocument, text: string): Pr
     text.slice(start, endNew),
   );
   await vscode.workspace.applyEdit(edit);
+}
+
+// Renames the note after its inline title; VS Code then reopens the editor for the new file and
+// registerAssetSync moves the assets folder. Returns false if nothing was renamed.
+async function renameNote(document: vscode.TextDocument, title: string): Promise<boolean> {
+  const name = titleToFileName(title);
+  const oldName = document.uri.path.split('/').pop()!;
+  const newName = name + (/\.[^.]+$/.exec(oldName)?.[0] ?? '.md');
+  if (!name || newName === oldName) {
+    return false;
+  }
+  const target = vscode.Uri.joinPath(document.uri, '..', newName);
+  // Case-only renames hit the same file on macOS' case-insensitive file system.
+  const taken = await vscode.workspace.fs.stat(target).then(() => true, () => false);
+  if (taken && newName.toLowerCase() !== oldName.toLowerCase()) {
+    vscode.window.showWarningMessage(`A note named ${newName} already exists.`);
+    return false;
+  }
+  await document.save();
+  const edit = new vscode.WorkspaceEdit();
+  edit.renameFile(document.uri, target);
+  if (!(await vscode.workspace.applyEdit(edit))) {
+    vscode.window.showWarningMessage(`Could not rename the note to ${newName}.`);
+    return false;
+  }
+  return true;
 }
 
 // Saves a drawing the webview no longer waits for (VS Code reloaded, another drawing edited instead

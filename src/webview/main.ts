@@ -3,7 +3,7 @@ import '@milkdown/crepe/theme/common/style.css';
 import { imageBlockSchema } from '@milkdown/kit/component/image-block';
 import { commandsCtx, editorViewCtx, remarkPluginsCtx, remarkStringifyOptionsCtx } from '@milkdown/kit/core';
 import { clearTextInCurrentBlockCommand } from '@milkdown/kit/preset/commonmark';
-import { type EditorState, TextSelection } from '@milkdown/kit/prose/state';
+import { type EditorState, Selection, TextSelection } from '@milkdown/kit/prose/state';
 import type { EditorView } from '@milkdown/kit/prose/view';
 import { callCommand, insert, replaceAll } from '@milkdown/kit/utils';
 import { type Drawing, type DrawingFile, drawingFile, imageDrawing, isDrawing, isDrawingOpen, loadDrawing, openDrawingEditor } from './drawing';
@@ -18,6 +18,11 @@ declare function acquireVsCodeApi(): { postMessage(msg: unknown): void };
 
 const vscode = acquireVsCodeApi();
 const root = document.getElementById('editor') as HTMLElement;
+// Obsidian-style inline title above the note; editing it renames the file.
+const title = document.getElementById('title') as HTMLElement;
+let titleText = '';
+// Compact copy of the title pinned to the top once the title is scrolled out of view.
+const titlebar = document.getElementById('titlebar') as HTMLElement;
 
 let crepe: Crepe | undefined;
 let baseUri = '';
@@ -184,6 +189,48 @@ async function createEditor(text: string, folds: Fold[]): Promise<void> {
   setFolds(view, folds);
 }
 
+function setTitle(text: string): void {
+  titleText = text;
+  title.textContent = text;
+  titlebar.textContent = text;
+}
+
+new IntersectionObserver(([entry]) => titlebar.classList.toggle('visible', !entry.isIntersecting)).observe(title);
+
+titlebar.addEventListener('mousedown', (e) => {
+  e.preventDefault();
+  window.scrollTo({ top: 0, behavior: 'smooth' });
+  title.focus();
+});
+
+title.addEventListener('keydown', (e) => {
+  if (e.key === 'Escape') {
+    title.textContent = titleText;
+  }
+  if (e.key !== 'Enter' && e.key !== 'Escape') {
+    return;
+  }
+  e.preventDefault();
+  if (!crepe) {
+    title.blur();
+    return;
+  }
+  // Like Obsidian: Enter continues at the start of the note (the blur renames).
+  const view = getView();
+  view.dispatch(view.state.tr.setSelection(Selection.atStart(view.state.doc)));
+  view.focus();
+});
+
+title.addEventListener('blur', () => {
+  const text = (title.textContent ?? '').replace(/\s+/g, ' ').trim();
+  if (!text || text === titleText) {
+    title.textContent = titleText;
+    return;
+  }
+  // The extension reopens the editor for the renamed file, or sends the old title back.
+  vscode.postMessage({ type: 'rename', title: text });
+});
+
 root.addEventListener(
   'paste',
   (e) => {
@@ -270,7 +317,7 @@ function runFormatCommand(command: string, payload?: unknown): void {
 window.addEventListener(
   'keydown',
   (e) => {
-    if (isDrawingOpen()) {
+    if (isDrawingOpen() || e.target === title) {
       return;
     }
     const inCodeBlock = (e.target as HTMLElement).closest?.('.cm-editor');
@@ -326,6 +373,7 @@ window.addEventListener('message', async (event) => {
       document.body.dataset.theme = msg.theme;
       document.body.style.setProperty('--mdlive-font-size', `${msg.fontSize}px`);
       drawingDevice = msg.drawingDevice;
+      setTitle(msg.title);
       await createEditor(msg.text, msg.folds);
       break;
     case 'update':
@@ -337,6 +385,9 @@ window.addEventListener('message', async (event) => {
       crepe.editor.action(replaceAll(msg.text));
       lastSynced = crepe.getMarkdown();
       setFolds(getView(), folds);
+      break;
+    case 'title':
+      setTitle(msg.title);
       break;
     case 'theme':
       document.body.dataset.theme = msg.theme;

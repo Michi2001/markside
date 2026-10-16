@@ -80,7 +80,54 @@ body[data-theme='dark'] {
 .milkdown .ProseMirror {
   max-width: 960px;
   margin: 0;
-  padding: 40px;
+  padding: 8px 40px 40px;
+}
+
+/* Inline title (file name), styled like Crepe's h1 and aligned with the note's text. */
+#title {
+  box-sizing: border-box;
+  max-width: 960px;
+  margin: 0;
+  padding: 40px 40px 0;
+  font-family: var(--vscode-font-family);
+  font-size: calc(var(--mdlive-font-size, 16px) * 2.625);
+  font-weight: 600;
+  line-height: 1.1905;
+  outline: none;
+  overflow-wrap: anywhere;
+}
+
+/* Pinned title, shown while the inline title is scrolled out of view (below Crepe's tooltips). */
+#titlebar {
+  position: fixed;
+  top: 0;
+  left: 0;
+  right: 0;
+  z-index: 5;
+  box-sizing: border-box;
+  padding: 6px 40px;
+  background: var(--vscode-editor-background);
+  border-bottom: 1px solid var(--vscode-editorWidget-border, var(--vscode-descriptionForeground));
+  font-family: var(--vscode-font-family);
+  font-size: calc(var(--mdlive-font-size, 16px) * 1.1);
+  font-weight: 600;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  cursor: pointer;
+  opacity: 0;
+  pointer-events: none;
+  transition: opacity 0.15s;
+}
+
+#titlebar.visible {
+  opacity: 1;
+  pointer-events: auto;
+}
+
+#title:empty::before {
+  content: 'Untitled';
+  opacity: 0.4;
 }
 
 /* No block handle (+ and drag) left of blocks; the slash menu stays. */
