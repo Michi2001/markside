@@ -276,6 +276,18 @@ body.alt .page .textLayer span {
   z-index: 2;
 }
 
+/* Cards placed on the page's free space (`layoutRow`), above its text layer. */
+.card.on-page {
+  right: auto;
+  width: 240px;
+  z-index: 4;
+  box-shadow: 0 1px 6px rgba(0, 0, 0, 0.2);
+}
+
+.card.on-page:focus-within {
+  z-index: 5;
+}
+
 .card-head {
   display: flex;
   align-items: flex-start;
@@ -329,6 +341,28 @@ body.alt .page .textLayer span {
 .card:not(.page-note):not(.area) .card-label {
   -webkit-line-clamp: 1;
   line-height: 18px;
+}
+
+/* On the page, right next to its mark, a text note needs no quote either: like area notes, only ×
+   remains (explanations keep their collapsed one-line summary). */
+.card.on-page:not(.explain) {
+  padding-top: 6px;
+}
+
+.card.on-page:not(.explain) .card-label {
+  display: none;
+}
+
+.card.on-page:not(.explain) .card-head {
+  position: absolute;
+  top: 4px;
+  right: 4px;
+  z-index: 1;
+  padding: 0;
+}
+
+.card.on-page:not(.explain) .card-delete:not(:hover) {
+  background: var(--vscode-editorWidget-background, var(--vscode-editor-background));
 }
 
 .card.page-note .card-label {

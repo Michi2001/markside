@@ -144,13 +144,13 @@ export class LiveEditorProvider implements vscode.CustomTextEditorProvider {
           break;
         case 'edit': {
           const crlf = document.eol === vscode.EndOfLine.CRLF ? msg.text.replace(/\r?\n/g, '\r\n') : msg.text;
-          editQueue = editQueue.then(async () => {
+          editQueue = queueEdit(document.uri, async () => {
             // Unchanged blocks keep their original formatting; the webview keeps showing its own serialization.
             const text = preserveSource(document.getText(), crlf);
             webviewText = text;
             await applyMinimalEdit(document, text);
             // Changes the document again (and thus the webview) only if foreign images were pasted.
-            await applyMinimalEdit(document, await adoptAssets(document.uri, text));
+            await applyAdopted(document, text);
           });
           break;
         }
@@ -214,6 +214,26 @@ export class LiveEditorProvider implements vscode.CustomTextEditorProvider {
 }
 
 // Replaces only the changed middle part, so VS Code's undo stack and dirty tracking stay sensible.
+// Edits of one document from all panels (live editors, PDF views of the same notes, iPad results) run
+// one after another: an edit is computed from the current text, so no other edit may land before it
+// is applied (its range would be stale and garble the text).
+const documentQueues = new Map<string, Promise<unknown>>();
+
+export function queueEdit<T>(uri: vscode.Uri, task: () => Promise<T>): Promise<T> {
+  const next = (documentQueues.get(uri.toString()) ?? Promise.resolve()).then(task);
+  documentQueues.set(uri.toString(), next);
+  return next;
+}
+
+// Copies images linked from other notes' folders into the own one and relinks them, unless the
+// document changed meanwhile (applying `text` would revert that change; the next edit adopts them).
+export async function applyAdopted(document: vscode.TextDocument, text: string): Promise<void> {
+  const adopted = await adoptAssets(document.uri, text);
+  if (adopted !== text && document.getText() === text) {
+    await applyMinimalEdit(document, adopted);
+  }
+}
+
 export async function applyMinimalEdit(document: vscode.TextDocument, text: string): Promise<void> {
   const old = document.getText();
   if (old === text) {
@@ -272,11 +292,13 @@ export async function saveToNote(file: DrawingFile, target: DrawingTarget): Prom
   const document = await vscode.workspace.openTextDocument(note);
   const wasDirty = document.isDirty;
   const path = await saveImage(note, file.name, file.mime, file.data);
-  const text = document.getText();
-  await applyMinimalEdit(
-    document,
-    target.src && text.includes(target.src) ? text.split(target.src).join(path) : `${text.trimEnd()}\n\n![](${path})\n`,
-  );
+  await queueEdit(note, async () => {
+    const text = document.getText();
+    await applyMinimalEdit(
+      document,
+      target.src && text.includes(target.src) ? text.split(target.src).join(path) : `${text.trimEnd()}\n\n![](${path})\n`,
+    );
+  });
   if (!wasDirty) {
     await document.save();
   }

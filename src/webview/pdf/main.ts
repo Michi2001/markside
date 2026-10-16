@@ -9,9 +9,9 @@ import { applyInit, handleHostMessage, post, saveFile } from '../host';
 import { HIGHLIGHT_KEYS, type NoteEditor, createNoteEditor, getActiveEditor, installShortcuts, setActiveEditor } from '../noteEditor';
 import './pdf.css';
 
-// PDF pages on the left, the notes of `paper.pdf.md` as cards in the margin on the right, each next to
-// the text or area it belongs to (pushed down when they would overlap; long notes push the next page
-// down). Every card is a Crepe editor of its note's body, created once the card comes near the view.
+// PDF pages on the left, the notes of `paper.pdf.md` as cards next to the text or area they belong to:
+// on the page itself where it has free space close to the mark (`placeOnPage`), else in the margin on
+// the right (pushed down when they would overlap; long notes push the next page down). Every card is a Crepe editor of its note's body, created once the card comes near the view.
 // Every page has a page note card (empty until written); marks without a note are plain highlights
 // and only get a card while it is being edited.
 
@@ -28,6 +28,19 @@ const MAX_SCALE = 2;
 const SNAPSHOT_SCALE = 2.5;
 const RENDER_DELAY_MS = 200;
 const COLORS = ['yellow', 'red', 'green', 'blue'];
+// Free space on a page: grid cells of CELL points, occupied where the rendered page differs from its
+// background, grown by INK_PAD cells so cards keep a distance from the content.
+const CELL = 4;
+const INK_PAD = 2;
+// Widths a card placed on the page may take (column units, like the margin), widest first; narrower
+// ones cost NARROW_COST points of distance per unit, so they are only used to stay closer to the mark.
+const PAGE_CARD_WIDTHS = [240, 200, 160];
+const NARROW_COST = 0.1;
+// Spots right of the mark count their horizontal distance only this much (reading goes on to the right).
+const RIGHT_WEIGHT = 0.6;
+// A card goes onto the page only within this distance of its mark (fraction of the page's longer
+// side); farther away, the margin is easier to follow.
+const MAX_PAGE_DISTANCE = 0.12;
 // Hues of red and green; random colors (Alt+A, stored as `h<hue>`) keep away from them.
 const AVOID_HUES = [345, 135];
 
@@ -45,7 +58,16 @@ type Card = {
   sent: string[];
   // Claude's explanation (read-only, key `explain:<section key>`).
   explain?: boolean;
+  // Position on the page (PDF points) from the last layout, null = in the margin, undefined = not laid out yet.
+  place?: { x: number; y: number; w: number } | null;
+  // Kept in the margin until the focus leaves the card (new notes, Alt+N); then it may move onto the page.
+  inMargin?: boolean;
 };
+
+// Occupied cells of a page (1 = content or a card), row by row; `raw`: the content itself, without
+// the distance around it (connectors must not cross it).
+type Grid = { cols: number; rows: number; cells: Uint8Array; raw: Uint8Array };
+type Box = { x0: number; y0: number; x1: number; y1: number };
 
 // The snapshot image at the start of an area note stays in the file (for Claude) but is not shown in
 // its card; `text` is what the card edits.
@@ -72,6 +94,7 @@ type PageView = {
   lines: SVGSVGElement;
   renderedScale: number;
   task?: RenderTask;
+  ink?: Grid;
 };
 
 const viewer = document.getElementById('viewer') as HTMLElement;
@@ -89,6 +112,8 @@ let pendingFocus: string | undefined;
 let folds: Record<string, Fold[]> = {};
 // Mark under the pointer (Delete/Backspace removes it).
 let hoveredMark: string | undefined;
+// Own note card under the pointer (Alt+K asks Claude about it).
+let hoveredCard: Card | undefined;
 // Notes just created with their card open: left empty, the mark goes too.
 const freshNotes = new Set<string>();
 // Claude's explanations (`paper.pdf.claude.md`) as received, and those shown, with their terms found.
@@ -162,7 +187,53 @@ async function renderPage(pv: PageView): Promise<void> {
   pv.pageEl.querySelectorAll('canvas, .textLayer').forEach((el) => el.remove());
   pv.pageEl.prepend(canvas);
   pv.pageEl.append(textLayer);
+  if (!pv.ink) {
+    pv.ink = inkGrid(pv, canvas);
+    scheduleLayout(pv);
+  }
   await new pdfjs.TextLayer({ textContentSource: pv.page.streamTextContent(), container: textLayer, viewport }).render();
+}
+
+// Cells where the rendered page differs from its most frequent color (text, images, figures). A page
+// with a busy background ends up fully occupied, so its cards stay in the margin.
+function inkGrid(pv: PageView, canvas: HTMLCanvasElement): Grid {
+  const { width, height } = canvas;
+  const data = canvas.getContext('2d')!.getImageData(0, 0, width, height).data;
+  const counts = new Map<number, number>();
+  for (let i = 0; i < data.length; i += 4 * 7) {
+    const c = ((data[i] >> 4) << 8) | ((data[i + 1] >> 4) << 4) | (data[i + 2] >> 4);
+    counts.set(c, (counts.get(c) ?? 0) + 1);
+  }
+  const bg = [...counts].reduce((a, b) => (b[1] > a[1] ? b : a))[0];
+  const [br, bgG, bb] = [((bg >> 8) & 15) * 16 + 8, ((bg >> 4) & 15) * 16 + 8, (bg & 15) * 16 + 8];
+  const cols = Math.ceil(pv.width / CELL);
+  const rows = Math.ceil(pv.height / CELL);
+  const ink = new Uint8Array(cols * rows);
+  for (let y = 0; y < height; y++) {
+    const row = Math.min(rows - 1, Math.floor((y / height) * rows)) * cols;
+    for (let x = 0; x < width; x++) {
+      const i = (y * width + x) * 4;
+      if (Math.abs(data[i] - br) + Math.abs(data[i + 1] - bgG) + Math.abs(data[i + 2] - bb) > 60) {
+        ink[row + Math.min(cols - 1, Math.floor((x / width) * cols))] = 1;
+      }
+    }
+  }
+  const grid = { cols, rows, cells: new Uint8Array(cols * rows), raw: ink };
+  for (let r = 0; r < rows; r++) {
+    for (let c = 0; c < cols; c++) {
+      if (ink[r * cols + c]) {
+        fillCells(grid, c - INK_PAD, r - INK_PAD, c + INK_PAD + 1, r + INK_PAD + 1);
+      }
+    }
+  }
+  return grid;
+}
+
+// Marks cells [c0, c1) x [r0, r1) as occupied (clamped to the grid).
+function fillCells(grid: Grid, c0: number, r0: number, c1: number, r1: number): void {
+  for (let r = Math.max(0, r0); r < Math.min(grid.rows, r1); r++) {
+    grid.cells.fill(1, r * grid.cols + Math.max(0, c0), r * grid.cols + Math.min(grid.cols, c1));
+  }
 }
 
 function releasePage(pv: PageView): void {
@@ -303,6 +374,9 @@ function createCard(section: Section): Card {
       if (cards.get(card.key) !== card || !left) {
         return;
       }
+      // No longer kept in its spot: it may move (onto the page, or off it when it grew over its text).
+      card.inMargin = false;
+      scheduleLayout(pv);
       const fresh = freshNotes.delete(card.key);
       if (card.section.anchor && isEmpty(card)) {
         if (fresh) {
@@ -427,8 +501,12 @@ function removeNote(key: string, discard = false): void {
 }
 
 // Opens the card of a note (created on demand for a plain highlight).
-function openNote(section: Section, atEnd: boolean): void {
+// `fresh`: a note just created; it is written in the margin and placed once the focus leaves it.
+function openNote(section: Section, atEnd: boolean, fresh = false): void {
   const card = cards.get(section.key) ?? createCard(section);
+  if (fresh || card.place === undefined) {
+    card.inMargin = true;
+  }
   layoutRow(pageView(section.page)!);
   focusCard(card, atEnd);
 }
@@ -477,7 +555,7 @@ function applySections(sections: Section[]): void {
   const focus = pendingFocus && byKey.get(pendingFocus);
   if (focus) {
     pendingFocus = undefined;
-    openNote(focus, true);
+    openNote(focus, true, true);
   }
 }
 
@@ -765,47 +843,219 @@ function layoutAll(): void {
   }
 }
 
-// Places each card at the height of its mark, below the previous card if they would overlap, and
-// lets the row grow when the notes are longer than the page.
-// Card positions are in the column's own units (before its zoom).
+// Cards of marks go onto the page, into the free spot closest to their mark (`placeOnPage`); page
+// notes and cards without room go into the margin, each at the height of its mark, below the previous
+// card if they would overlap; the row grows when the notes are longer than the page.
+// A card being edited (or an opened explanation) keeps its spot, so it never jumps while typing.
+// Margin positions are in the column's own units (before its zoom), page positions in PDF points.
 function layoutRow(pv: PageView): void {
-  const pageHeight = (pv.height * scale) / notesZoom();
+  const z = notesZoom();
+  const pageHeight = (pv.height * scale) / z;
+  const rowCards = cardsOf(pv);
+  const pinned = (card: Card) =>
+    !!card.inMargin || (card.place !== undefined && (card.el.contains(document.activeElement) || (!!card.explain && expanded.has(card.key))));
+  const trying = rowCards.filter((card) => !pinned(card) && card.section.anchor && pv.ink);
+  // Heights at each width a card is tried with; reads and writes in batches, not per card.
+  rowCards.forEach((card) => {
+    const onPage = pinned(card) ? !!card.place && !card.inMargin : trying.includes(card);
+    card.el.classList.toggle('on-page', onPage);
+    card.el.style.width = onPage && card.place ? `${card.place.w}px` : '';
+  });
+  const heights = new Map(rowCards.map((card) => [card, card.el.offsetHeight]));
+  const heightsAt = PAGE_CARD_WIDTHS.map((w) => {
+    trying.forEach((card) => (card.el.style.width = `${w}px`));
+    return new Map(trying.map((card) => [card, card.el.offsetHeight]));
+  });
+  const grid = pv.ink && freeGrid(pv);
+  const toPoints = (px: number) => (px * z) / scale;
+  const boxes: Box[] = [];
+  // A placed card and its connector take their cells, so later cards neither cover nor cross them.
+  const reserve = (card: Card) => {
+    const { x, y, w } = card.place!;
+    const box = { x0: x, y0: y, x1: x + toPoints(w), y1: y + toPoints(heights.get(card)!) };
+    boxes.push(box);
+    fillCells(grid!, Math.floor(box.x0 / CELL) - 1, Math.floor(box.y0 / CELL) - 1, Math.ceil(box.x1 / CELL) + 1, Math.ceil(box.y1 / CELL) + 1);
+    alongLine(connector(markBox(card.section.anchor!, pv.width, pv.height), box), (c, r) => fillCells(grid!, c, r, c + 1, r + 1));
+  };
+  for (const card of rowCards) {
+    if (card.inMargin) {
+      card.place = null;
+    } else if (pinned(card) && card.place && grid) {
+      reserve(card);
+    }
+  }
+  for (const card of trying) {
+    const sizes = PAGE_CARD_WIDTHS.map((w, i) => ({ w, wPt: toPoints(w), hPt: toPoints(heightsAt[i].get(card)!) }));
+    card.place = placeOnPage(pv, grid!, card.section.anchor!, sizes, boxes);
+    if (card.place) {
+      heights.set(card, heightsAt[PAGE_CARD_WIDTHS.indexOf(card.place.w)].get(card)!);
+      reserve(card);
+    }
+  }
+  const margin = rowCards.filter((card) => !card.place);
+  margin.forEach((card) => {
+    card.el.classList.remove('on-page');
+    card.el.style.width = '';
+  });
+  rowCards.forEach((card) => card.place && (card.el.style.width = `${card.place.w}px`));
+  margin.forEach((card) => heights.set(card, card.el.offsetHeight));
+
   let y = 0;
   const placed: { card: Card; top: number }[] = [];
-  // Heights first, then positions: alternating reads and writes would force a layout per card.
-  const rowCards = cardsOf(pv);
-  const heights = rowCards.map((card) => card.el.offsetHeight);
-  rowCards.forEach((card, i) => {
-    const desired = card.section.anchor ? top(card.section.anchor) * pageHeight - 10 : 0;
-    const cardTop = Math.max(desired, y);
-    card.el.style.top = `${cardTop}px`;
-    placed.push({ card, top: cardTop });
-    y = cardTop + heights[i] + CARD_GAP;
-  });
+  for (const card of rowCards) {
+    if (card.place) {
+      card.el.style.left = `${(card.place.x * scale - pv.width * scale - GAP) / z}px`;
+      card.el.style.top = `${(card.place.y * scale) / z}px`;
+    } else {
+      const desired = card.section.anchor ? top(card.section.anchor) * pageHeight - 10 : 0;
+      const cardTop = Math.max(desired, y);
+      card.el.style.left = '';
+      card.el.style.top = `${cardTop}px`;
+      y = cardTop + heights.get(card)! + CARD_GAP;
+    }
+    placed.push({ card, top: parseFloat(card.el.style.top) });
+  }
   pv.margin.style.height = `${Math.max(pageHeight, y)}px`;
-  drawLines(pv, placed);
+  drawLines(pv, placed, heights);
 }
 
-// Connector from each mark to its card.
-function drawLines(pv: PageView, placed: { card: Card; top: number }[]): void {
+// The page's content plus all marks on it, as occupied cells.
+function freeGrid(pv: PageView): Grid {
+  const grid = { ...pv.ink!, cells: pv.ink!.cells.slice() };
+  for (const section of [...latestSections, ...shownExplanations]) {
+    if (section.anchor?.page !== pv.num) {
+      continue;
+    }
+    for (const r of section.anchor.rects) {
+      fillCells(grid, Math.floor((r.x * pv.width) / CELL), Math.floor((r.y * pv.height) / CELL), Math.ceil(((r.x + r.w) * pv.width) / CELL), Math.ceil(((r.y + r.h) * pv.height) / CELL));
+    }
+  }
+  return grid;
+}
+
+// Bounding box of a mark, in units of a page of size w x h.
+function markBox(anchor: Anchor, w: number, h: number): Box {
+  return {
+    x0: Math.min(...anchor.rects.map((r) => r.x)) * w,
+    y0: Math.min(...anchor.rects.map((r) => r.y)) * h,
+    x1: Math.max(...anchor.rects.map((r) => r.x + r.w)) * w,
+    y1: Math.max(...anchor.rects.map((r) => r.y + r.h)) * h,
+  };
+}
+
+function clamp(v: number, a: number, b: number): number {
+  return Math.max(a, Math.min(b, v));
+}
+
+// Connector between a mark and a card on the page: the shortest line between the two boxes.
+function connector(m: Box, c: Box): [number, number, number, number] {
+  const sx = clamp((c.x0 + c.x1) / 2, m.x0, m.x1);
+  const sy = clamp((c.y0 + c.y1) / 2, m.y0, m.y1);
+  const ex = clamp(sx, c.x0, c.x1);
+  const ey = clamp(sy, c.y0, c.y1);
+  return [clamp(ex, m.x0, m.x1), clamp(ey, m.y0, m.y1), ex, ey];
+}
+
+// Calls `visit` with the grid cell (column, row) of points along the line (PDF points); stops when it
+// returns false.
+function alongLine([x0, y0, x1, y1]: [number, number, number, number], visit: (c: number, r: number, x: number, y: number) => boolean | void): boolean {
+  const steps = Math.ceil(Math.hypot(x1 - x0, y1 - y0) / (CELL / 2));
+  for (let i = 1; i < steps; i++) {
+    const x = x0 + ((x1 - x0) * i) / steps;
+    const y = y0 + ((y1 - y0) * i) / steps;
+    if (visit(Math.floor(x / CELL), Math.floor(y / CELL), x, y) === false) {
+      return false;
+    }
+  }
+  return true;
+}
+
+// Free spot (PDF points) closest to the mark for a card in one of its `sizes` (`w` in column units,
+// `wPt`/`hPt` in points) whose connector crosses neither content nor other cards (`boxes`), or null
+// when there is none closer than the margin.
+function placeOnPage(
+  pv: PageView,
+  grid: Grid,
+  anchor: Anchor,
+  sizes: { w: number; wPt: number; hPt: number }[],
+  boxes: Box[],
+): { x: number; y: number; w: number } | null {
+  const { cols, rows, cells, raw } = grid;
+  // Summed-area table: occupied cells in any rectangle in constant time.
+  const sum = new Int32Array((cols + 1) * (rows + 1));
+  for (let r = 0; r < rows; r++) {
+    for (let c = 0; c < cols; c++) {
+      sum[(r + 1) * (cols + 1) + c + 1] = cells[r * cols + c] + sum[r * (cols + 1) + c + 1] + sum[(r + 1) * (cols + 1) + c] - sum[r * (cols + 1) + c];
+    }
+  }
+  const mark = markBox(anchor, pv.width, pv.height);
+  const inside = (b: Box, x: number, y: number) => x >= b.x0 && x <= b.x1 && y >= b.y0 && y <= b.y1;
+  // The mark's own glyphs may reach a little past its rectangles (descenders, cell rounding).
+  const own = { x0: mark.x0 - CELL, y0: mark.y0 - CELL, x1: mark.x1 + CELL, y1: mark.y1 + CELL };
+  const clearLine = (card: Box) =>
+    alongLine(connector(mark, card), (c, r, x, y) =>
+      inside(own, x, y) || inside(card, x, y) || (!raw[r * cols + c] && !boxes.some((b) => inside(b, x, y))),
+    );
+  // The margin starts at the page's right edge; a spot farther away than that is no gain.
+  let best = Math.min(pv.width - mark.x1 + GAP / scale, MAX_PAGE_DISTANCE * Math.max(pv.width, pv.height));
+  let place: { x: number; y: number; w: number } | null = null;
+  for (const { w, wPt, hPt } of sizes) {
+    const cost = (PAGE_CARD_WIDTHS[0] - w) * NARROW_COST;
+    const cw = Math.ceil(wPt / CELL);
+    const ch = Math.ceil(hPt / CELL);
+    for (let r = 0; r + ch <= rows; r++) {
+      const y = r * CELL;
+      const dy = Math.max(0, y - mark.y1, mark.y0 - (y + hPt));
+      if (dy + cost >= best) {
+        continue;
+      }
+      for (let c = 0; c + cw <= cols; c++) {
+        const x = c * CELL;
+        const dx = x >= mark.x1 ? (x - mark.x1) * RIGHT_WEIGHT : Math.max(0, mark.x0 - (x + wPt));
+        const d = Math.hypot(dx, dy) + cost;
+        const used = () =>
+          sum[(r + ch) * (cols + 1) + c + cw] - sum[r * (cols + 1) + c + cw] - sum[(r + ch) * (cols + 1) + c] + sum[r * (cols + 1) + c];
+        if (d < best && used() === 0 && clearLine({ x0: x, y0: y, x1: x + wPt, y1: y + hPt })) {
+          best = d;
+          place = { x, y, w };
+        }
+      }
+    }
+  }
+  return place;
+}
+
+// Connector from each mark to its card: on the page the shortest line between them, to the margin a
+// curve from the page edge level with the mark (so it never runs across the page's text).
+function drawLines(pv: PageView, placed: { card: Card; top: number }[], heights: Map<Card, number>): void {
   const pageWidth = pv.width * scale;
   const pageHeight = pv.height * scale;
   // Computed, not measured: the page starts the row and the column follows after the flex gap (GAP).
   // Measuring the zoomed column differs between Chromium versions (CSS zoom semantics changed).
   const x1 = pageWidth + GAP;
+  const z = notesZoom();
   pv.lines.replaceChildren();
   for (const { card, top: cardTop } of placed) {
     const { anchor } = card.section;
     if (!anchor) {
       continue;
     }
-    // Starts at the page edge, level with the mark, so it never runs across the page's text.
-    const first = anchor.rects.reduce((a, b) => (b.y < a.y ? b : a));
-    const sy = (first.y + first.h / 2) * pageHeight;
-    const ey = (cardTop + 14) * notesZoom();
-    const edge = pageWidth;
+    let d: string;
+    if (card.place) {
+      const x0 = card.place.x * scale;
+      const y0 = card.place.y * scale;
+      const box = { x0, y0, x1: x0 + card.place.w * z, y1: y0 + heights.get(card)! * z };
+      const [sx, sy, ex, ey] = connector(markBox(anchor, pageWidth, pageHeight), box);
+      d = `M${sx},${sy} L${ex},${ey}`;
+    } else {
+      const first = anchor.rects.reduce((a, b) => (b.y < a.y ? b : a));
+      const sy = (first.y + first.h / 2) * pageHeight;
+      const ey = (cardTop + 14) * z;
+      const edge = pageWidth;
+      d = `M${edge},${sy} C${edge + GAP / 2},${sy} ${x1 - GAP / 2},${ey} ${x1},${ey}`;
+    }
     const path = document.createElementNS('http://www.w3.org/2000/svg', 'path');
-    path.setAttribute('d', `M${edge},${sy} C${edge + GAP / 2},${sy} ${x1 - GAP / 2},${ey} ${x1},${ey}`);
+    path.setAttribute('d', d);
     path.dataset.key = card.key;
     path.dataset.color = anchor.color;
     setCustomColor(path, anchor.color);
@@ -994,6 +1244,10 @@ function askClaude(): void {
     post({ type: 'askClaude', page: current.pv.num, quote, rects: selectionRects(current.range, current.pv) });
     return;
   }
+  if (hoveredCard) {
+    post({ type: 'askClaude', page: hoveredCard.section.page, key: hoveredCard.key, note: true });
+    return;
+  }
   const mark = latestSections.find((s) => s.key === hoveredMark);
   const page = mark?.page ?? pageInView()?.num;
   if (page) {
@@ -1070,6 +1324,8 @@ viewer.addEventListener('click', (e) => {
 
 viewer.addEventListener('mousemove', (e) => {
   const pv = pageOf(e.target as Node);
+  const cardEl = (e.target as Element).closest?.('.card');
+  hoveredCard = [...cards.values()].find((c) => c.el === cardEl && !c.explain);
   hoveredMark = undefined;
   if (pv) {
     const note = noteAt(pv, e);
@@ -1079,7 +1335,10 @@ viewer.addEventListener('mousemove', (e) => {
     pv.pageEl.classList.toggle('over-mark', !!note || !!explained);
   }
 });
-viewer.addEventListener('mouseleave', () => (hoveredMark = undefined));
+viewer.addEventListener('mouseleave', () => {
+  hoveredMark = undefined;
+  hoveredCard = undefined;
+});
 
 // The connector of the focused card is emphasized.
 for (const type of ['focusin', 'focusout']) {
@@ -1171,8 +1430,29 @@ window.addEventListener(
       }
       return;
     }
-    // Alt+K outside the cards asks Claude about the selected text, the mark under the pointer or the
-    // page in view (inside a card it mentions the card's text, see installShortcuts).
+    // Alt+N in a card: move it into the margin while editing it; placed again once the focus leaves.
+    if (e.code === 'KeyN' && focused) {
+      e.preventDefault();
+      e.stopImmediatePropagation();
+      const card = [...cards.values()].find((c) => c.el === focused);
+      if (card && !card.inMargin) {
+        card.inMargin = true;
+        layoutRow(pageView(card.section.page)!);
+        card.el.scrollIntoView({ block: 'nearest', inline: 'nearest' });
+      }
+      return;
+    }
+    // Alt+K in a card without selected text asks Claude about the whole note (with selected text it
+    // mentions those lines of the notes file, see installShortcuts).
+    const focusedCard = [...cards.values()].find((c) => c.el === focused);
+    if (e.code === 'KeyK' && focusedCard?.editor && !focusedCard.explain && focusedCard.editor.view().state.selection.empty) {
+      e.preventDefault();
+      e.stopImmediatePropagation();
+      post({ type: 'askClaude', page: focusedCard.section.page, key: focusedCard.key, note: true });
+      return;
+    }
+    // Alt+K outside the cards asks Claude about the selected text, the note card or mark under the
+    // pointer or the page in view.
     if (e.code === 'KeyK' && !focused) {
       e.preventDefault();
       e.stopImmediatePropagation();

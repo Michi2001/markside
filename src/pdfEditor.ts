@@ -1,10 +1,10 @@
 import * as path from 'path';
 import * as vscode from 'vscode';
-import { adoptAssets, cleanupAssets, explanationsUri, loadFolds, notesUri, saveFolds, saveImage, writeClaudeContext } from './assets';
+import { cleanupAssets, explanationsUri, loadFolds, notesUri, saveFolds, saveImage, writeClaudeContext } from './assets';
 import { DrawingServer, getDrawingDevice } from './drawingServer';
 import { type PdfView, explainSlides, isExplaining } from './explain';
 import type { FontSizes } from './fontSizes';
-import { applyMinimalEdit, getTheme, sendSelectionToClaude } from './liveEditor';
+import { applyAdopted, applyMinimalEdit, getTheme, queueEdit, sendSelectionToClaude } from './liveEditor';
 import { preserveSource } from './preserve';
 import {
   type Anchor,
@@ -30,7 +30,7 @@ type WebviewMessage =
   | { type: 'folds'; folds: Record<string, Fold[]> }
   | { type: 'saveImage'; id: number; name: string; mime: string; data: string }
   | { type: 'selection'; text: string }
-  | { type: 'askClaude'; page: number; quote?: string; rects?: Rect[]; key?: string }
+  | { type: 'askClaude'; page: number; quote?: string; rects?: Rect[]; key?: string; note?: boolean }
   | { type: 'view'; page: number; pages: number }
   | { type: 'pageTexts'; texts: string[] }
   | { type: 'deleteExplanation'; key: string }
@@ -103,8 +103,9 @@ export class PdfEditorProvider implements vscode.CustomReadonlyEditorProvider {
     const undoStack: Step[] = [];
     const redoStack: Step[] = [];
 
+    // Shared with other panels on the same notes (split view, the notes open in a live editor).
     const queue = (task: () => Promise<unknown>): void => {
-      editQueue = editQueue.then(task);
+      editQueue = queueEdit(notes, task);
     };
 
     const openNote = async (): Promise<vscode.TextDocument> => {
@@ -138,7 +139,7 @@ export class PdfEditorProvider implements vscode.CustomReadonlyEditorProvider {
       const text = change(doc.getText());
       ownText = text;
       await applyMinimalEdit(doc, text);
-      await applyMinimalEdit(doc, await adoptAssets(doc.uri, text));
+      await applyAdopted(doc, text);
       scheduleSave();
     };
 
@@ -429,7 +430,7 @@ function claudeContext(
   pdf: vscode.Uri,
   notesText: string | undefined,
   explanationsText: string | undefined,
-  { page, quote, rects, key }: { page: number; quote?: string; rects?: Rect[]; key?: string },
+  { page, quote, rects, key, note }: { page: number; quote?: string; rects?: Rect[]; key?: string; note?: boolean },
 ): string {
   const rel = (uri: vscode.Uri) => vscode.workspace.asRelativePath(uri, false);
   const sections = parseSections(notesText ?? '').filter((s) => s.page === page && (s.anchor || s.body.trim()));
@@ -452,6 +453,10 @@ function claudeContext(
   }
   if (mark?.anchor?.area) {
     lines.push('', '## Marked area', '', `\`#${mark.key}\` on page ${page}; its snapshot is the image at the start of that note below.`);
+  }
+  if (note && mark) {
+    const heading = mark.anchor ? `### [${mark.label}](#${mark.key})` : `## Page ${page}`;
+    lines.push('', '## My note in question', '', `The question is about my note \`${heading}\`:`, '', fenced(mark.body));
   }
   if (sections.length > 0) {
     lines.push(
