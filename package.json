@@ -121,11 +121,6 @@
           "group": "navigation@2"
         },
         {
-          "command": "mdLive.insertDrawing",
-          "when": "activeCustomEditorId == mdLive.editor",
-          "group": "navigation@3"
-        },
-        {
           "command": "mdLive.chooseDrawingDevice.mac",
           "when": "activeCustomEditorId == mdLive.editor && config.mdLive.drawingDevice == mac",
           "group": "navigation@3"

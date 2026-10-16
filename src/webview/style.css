@@ -80,8 +80,38 @@ body[data-theme='dark'] {
 .milkdown .ProseMirror {
   max-width: 960px;
   margin: 0;
-  /* Left padding leaves just enough room for Crepe's block handle (+ and drag). */
-  padding: 40px 40px 40px 72px;
+  padding: 40px;
+}
+
+/* No block handle (+ and drag) left of blocks; the slash menu stays. */
+.milkdown .milkdown-block-handle {
+  display: none;
+}
+
+/* Tables may grow beyond the text column up to the window's right padding and
+   size columns by content (ProseMirror's default is fixed, equal columns);
+   wider tables scroll horizontally. */
+.milkdown .milkdown-table-block {
+  width: max(100%, calc(100vw - 80px));
+}
+
+/* The padding keeps Crepe's (invisible) add-row/column buttons, which stick out
+   of the table edges, inside the scroll area so they don't cause a scrollbar. */
+.milkdown .milkdown-table-block .table-wrapper {
+  overflow-x: auto;
+  margin: -16px;
+  padding: 16px;
+}
+
+.milkdown .milkdown-table-block table {
+  table-layout: auto;
+  width: auto;
+}
+
+.milkdown .milkdown-table-block th,
+.milkdown .milkdown-table-block td {
+  min-width: 4em;
+  overflow-wrap: normal;
 }
 
 .milkdown ::selection {
