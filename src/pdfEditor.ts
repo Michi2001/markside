@@ -1,10 +1,24 @@
+import * as path from 'path';
 import * as vscode from 'vscode';
-import { adoptAssets, cleanupAssets, loadFolds, notesUri, saveFolds, saveImage, writeClaudeContext } from './assets';
+import { adoptAssets, cleanupAssets, explanationsUri, loadFolds, notesUri, saveFolds, saveImage, writeClaudeContext } from './assets';
 import { DrawingServer, getDrawingDevice } from './drawingServer';
+import { type PdfView, explainSlides, isExplaining } from './explain';
 import type { FontSizes } from './fontSizes';
 import { applyMinimalEdit, getTheme, sendSelectionToClaude } from './liveEditor';
 import { preserveSource } from './preserve';
-import { type Anchor, type Rect, type Section, addNote, deleteNote, formatAnchor, parseSections, setNoteBody } from './sidecar';
+import {
+  type Anchor,
+  type Rect,
+  type Section,
+  addNote,
+  deleteNote,
+  deleteSection,
+  formatAnchor,
+  pageKey,
+  parseExplanations,
+  parseSections,
+  setNoteBody,
+} from './sidecar';
 import type { Fold } from './webview/fold';
 
 type WebviewMessage =
@@ -17,6 +31,10 @@ type WebviewMessage =
   | { type: 'saveImage'; id: number; name: string; mime: string; data: string }
   | { type: 'selection'; text: string }
   | { type: 'askClaude'; page: number; quote?: string; rects?: Rect[]; key?: string }
+  | { type: 'view'; page: number; pages: number }
+  | { type: 'pageTexts'; texts: string[] }
+  | { type: 'deleteExplanation'; key: string }
+  | { type: 'adoptExplanation'; key: string; rects: Rect[] | null; color: string }
   | { type: 'drawRemote'; id: number; drawing: unknown; src: string | null };
 
 const SAVE_DELAY_MS = 800;
@@ -32,12 +50,27 @@ const noteData = (s: Section): NoteData => ({ anchor: s.anchor!, label: s.label,
 // tab never shows it as dirty.
 export class PdfEditorProvider implements vscode.CustomReadonlyEditorProvider {
   static readonly viewType = 'mdLive.pdf';
+  // The focused PDF view (for the explain command).
+  private active: PdfView | undefined;
 
   constructor(
     private readonly extensionUri: vscode.Uri,
     private readonly drawingServer: DrawingServer,
     private readonly fontSizes: FontSizes,
   ) {}
+
+  explainSlides(): void {
+    if (!this.active) {
+      vscode.window.showWarningMessage('No PDF is active.');
+      return;
+    }
+    explainSlides(this.active, () => this.updateContext());
+  }
+
+  // Shows the running spinner in the editor title instead of the explain button.
+  private updateContext(): void {
+    vscode.commands.executeCommand('setContext', 'mdLive.explaining', !!this.active && isExplaining(this.active.pdf));
+  }
 
   openCustomDocument(uri: vscode.Uri): vscode.CustomDocument {
     return { uri, dispose: () => {} };
@@ -46,6 +79,7 @@ export class PdfEditorProvider implements vscode.CustomReadonlyEditorProvider {
   async resolveCustomEditor(document: vscode.CustomDocument, panel: vscode.WebviewPanel): Promise<void> {
     const pdf = document.uri;
     const notes = notesUri(pdf);
+    const explanations = explanationsUri(pdf);
     const docDir = vscode.Uri.joinPath(pdf, '..');
     const distUri = vscode.Uri.joinPath(this.extensionUri, 'dist');
     const workspaceRoots = (vscode.workspace.workspaceFolders ?? []).map((f) => f.uri);
@@ -118,9 +152,44 @@ export class PdfEditorProvider implements vscode.CustomReadonlyEditorProvider {
       }
     });
 
+    let resolveTexts: ((texts: string[]) => void) | undefined;
+    const view: PdfView = {
+      pdf,
+      page: 1,
+      pages: 0,
+      pageTexts: () =>
+        new Promise((resolve) => {
+          resolveTexts = resolve;
+          panel.webview.postMessage({ type: 'requestPageTexts' });
+        }),
+    };
+    if (panel.active) {
+      this.active = view;
+      this.updateContext();
+    }
+    const viewStateSub = panel.onDidChangeViewState(() => {
+      if (panel.active) {
+        this.active = view;
+        this.updateContext();
+      }
+    });
+
+    // Claude writes the explanations file directly on disk.
+    const readExplanations = async (): Promise<string | undefined> => ((await exists(explanations)) ? readText(explanations) : undefined);
+    const sendExplanations = async (): Promise<void> => {
+      panel.webview.postMessage({ type: 'explanations', sections: parseExplanations((await readExplanations()) ?? '') });
+    };
+    const watcher = vscode.workspace.createFileSystemWatcher(new vscode.RelativePattern(docDir, path.basename(explanations.path)));
+    watcher.onDidCreate(sendExplanations);
+    watcher.onDidChange(sendExplanations);
+    watcher.onDidDelete(sendExplanations);
+
     const configSub = vscode.workspace.onDidChangeConfiguration((e) => {
       if (e.affectsConfiguration('mdLive.theme')) {
         panel.webview.postMessage({ type: 'theme', theme: getTheme() });
+      }
+      if (e.affectsConfiguration('mdLive.pdfExplanations')) {
+        panel.webview.postMessage({ type: 'showExplanations', show: getShowExplanations() });
       }
       if (e.affectsConfiguration('mdLive.pdfNotesWidth')) {
         panel.webview.postMessage({ type: 'notesWidth', width: getNotesWidth() });
@@ -141,6 +210,11 @@ export class PdfEditorProvider implements vscode.CustomReadonlyEditorProvider {
 
     panel.onDidDispose(() => {
       changeSub.dispose();
+      watcher.dispose();
+      viewStateSub.dispose();
+      if (this.active === view) {
+        this.active = undefined;
+      }
       configSub.dispose();
       fontSizeSub.dispose();
       clearTimeout(saveTimer);
@@ -167,6 +241,8 @@ export class PdfEditorProvider implements vscode.CustomReadonlyEditorProvider {
             notesWidth: getNotesWidth(),
             drawingDevice: getDrawingDevice(),
             sections: sections(),
+            explanations: parseExplanations((await readExplanations()) ?? ''),
+            showExplanations: getShowExplanations(),
             folds: await loadFolds(notes, {}),
           });
           break;
@@ -236,6 +312,48 @@ export class PdfEditorProvider implements vscode.CustomReadonlyEditorProvider {
             sendNotes();
           });
           break;
+        case 'view':
+          view.page = msg.page;
+          view.pages = msg.pages;
+          break;
+        case 'pageTexts':
+          resolveTexts?.(msg.texts);
+          resolveTexts = undefined;
+          break;
+        case 'deleteExplanation':
+          queue(async () => {
+            const text = (await readExplanations()) ?? '';
+            const section = parseExplanations(text).find((s) => s.key === msg.key);
+            if (section) {
+              await vscode.workspace.fs.writeFile(explanations, Buffer.from(deleteSection(text, section)));
+            }
+          });
+          break;
+        case 'adoptExplanation':
+          // Moves an explanation into the own notes: a term found on the page becomes a text note on
+          // it, anything else goes to the end of the page note.
+          queue(async () => {
+            const text = (await readExplanations()) ?? '';
+            const section = parseExplanations(text).find((s) => s.key === msg.key);
+            if (!section) {
+              return;
+            }
+            await write((notesText) => {
+              if (section.anchor && msg.rects) {
+                const anchor = { page: section.page, rects: msg.rects, area: false, color: msg.color };
+                undoStack.push({ added: [{ anchor, label: section.label, body: section.body }], removed: [] });
+                redoStack.length = 0;
+                return addNote(notesText, anchor, section.label, section.body);
+              }
+              const key = pageKey(section.page);
+              const old = parseSections(notesText).find((s) => s.key === key)?.body ?? '';
+              const body = section.anchor ? `**${section.label}:** ${section.body}` : section.body;
+              return setNoteBody(notesText, key, old ? `${old}\n\n${body}` : body);
+            });
+            sendNotes();
+            await vscode.workspace.fs.writeFile(explanations, Buffer.from(deleteSection(text, section)));
+          });
+          break;
         case 'folds':
           queue(() => saveFolds(notes, msg.folds));
           break;
@@ -265,7 +383,7 @@ export class PdfEditorProvider implements vscode.CustomReadonlyEditorProvider {
           if (note?.isDirty) {
             await note.save();
           }
-          const context = claudeContext(pdf, note?.getText(), msg);
+          const context = claudeContext(pdf, note?.getText(), await readExplanations(), msg);
           const file = await writeClaudeContext(notes, context);
           await sendSelectionToClaude(await vscode.workspace.openTextDocument(file), panel, '');
           break;
@@ -310,6 +428,7 @@ export class PdfEditorProvider implements vscode.CustomReadonlyEditorProvider {
 function claudeContext(
   pdf: vscode.Uri,
   notesText: string | undefined,
+  explanationsText: string | undefined,
   { page, quote, rects, key }: { page: number; quote?: string; rects?: Rect[]; key?: string },
 ): string {
   const rel = (uri: vscode.Uri) => vscode.workspace.asRelativePath(uri, false);
@@ -344,6 +463,17 @@ function claudeContext(
       fenced(sections.map((s) => notesText!.slice(s.start, s.end).trim()).join('\n\n')),
     );
   }
+  const explained = parseExplanations(explanationsText ?? '').filter((s) => s.page === page && s.body.trim());
+  if (explained.length > 0) {
+    lines.push(
+      '',
+      `## Your earlier explanations of page ${page}`,
+      '',
+      `Excerpt from \`${rel(explanationsUri(pdf))}\`:`,
+      '',
+      fenced(explained.map((s) => explanationsText!.slice(s.start, s.end).trim()).join('\n\n')),
+    );
+  }
   return lines.join('\n').trimEnd() + '\n';
 }
 
@@ -352,6 +482,14 @@ function fenced(text: string): string {
   const longest = Math.max(2, ...(text.match(/`+/g) ?? []).map((m) => m.length));
   const fence = '`'.repeat(longest + 1);
   return `${fence}markdown\n${text}\n${fence}`;
+}
+
+function getShowExplanations(): boolean {
+  return vscode.workspace.getConfiguration('mdLive').get<boolean>('pdfExplanations', true);
+}
+
+async function readText(uri: vscode.Uri): Promise<string> {
+  return new TextDecoder().decode(await vscode.workspace.fs.readFile(uri));
 }
 
 function getNotesWidth(): number {

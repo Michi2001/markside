@@ -26,7 +26,8 @@ export type Section = {
 };
 
 const PAGE_HEADING = /^## Page (\d+)[ \t]*$/;
-const NOTE_HEADING = /^### \[((?:\\.|[^\]\\])*)\]\(#(p\d+=[^)\s]*)\)[ \t]*$/;
+// Rectangles are optional: Claude's explanations (`paper.pdf.claude.md`) name the term only.
+const NOTE_HEADING = /^### \[((?:\\.|[^\]\\])*)\]\(#(p\d+(?:=[^)\s]*)?)\)[ \t]*$/;
 const FENCE = /^ {0,3}(`{3,}|~{3,}|\$\$)/;
 
 export function pageKey(page: number): string {
@@ -42,7 +43,7 @@ export function formatAnchor({ page, rects, area, color }: Anchor): string {
 
 export function parseAnchor(anchor: string): Anchor {
   const [main, ...params] = anchor.split('&');
-  const [, page, boxes] = /^p(\d+)=(.*)$/.exec(main)!;
+  const [, page, boxes = ''] = /^p(\d+)(?:=(.*))?$/.exec(main)!;
   const rects = boxes
     .split(';')
     .map((b) => b.split(',').map(Number))
@@ -175,10 +176,21 @@ export function setNoteBody(text: string, key: string, body: string): string {
 
 // Removes a note; its page section goes too once it has neither a page note nor other notes.
 export function deleteNote(text: string, key: string): string {
-  const sections = parseSections(text);
-  const s = sections.find((s) => s.key === key);
-  if (!s) {
-    return text;
+  const s = parseSections(text).find((s) => s.key === key);
+  return s ? deleteSection(text, s) : text;
+}
+
+// Explanations by Claude (`paper.pdf.claude.md`): the same format, `## Page N` explains the slide,
+// `### [term](#pN)` a term on it (looked up on the page by its text). Keys include the term, since
+// all terms on a page share the anchor.
+export function parseExplanations(text: string): Section[] {
+  return parseSections(text).map((s) => (s.anchor ? { ...s, key: `${s.key}|${s.label}` } : s));
+}
+
+// Removes a text/area note or term explanation found by parseSections/parseExplanations.
+export function deleteSection(text: string, s: Section): string {
+  if (!s.anchor) {
+    return setNoteBody(text, s.key, '');
   }
   text = removeRange(text, s.start, s.end);
   const after = parseSections(text);

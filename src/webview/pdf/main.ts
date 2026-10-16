@@ -1,6 +1,7 @@
 import { Selection } from '@milkdown/kit/prose/state';
 import * as pdfjs from 'pdfjs-dist';
 import type { PDFPageProxy, RenderTask } from 'pdfjs-dist';
+import type { TextItem } from 'pdfjs-dist/types/src/display/api';
 import { type Anchor, type Rect, type Section, formatAnchor, pageKey } from '../../sidecar';
 import { isDrawingOpen } from '../drawing';
 import { type Fold, foldPlugin, getFolds, setFolds, toggleFold } from '../fold';
@@ -42,6 +43,8 @@ type Card = {
   // Bodies this card sent recently: a `notes` message carrying one of them is a late echo and must
   // not reset the editor while typing (macOS dictation would insert its phrase a second time).
   sent: string[];
+  // Claude's explanation (read-only, key `explain:<section key>`).
+  explain?: boolean;
 };
 
 // The snapshot image at the start of an area note stays in the file (for Claude) but is not shown in
@@ -88,6 +91,12 @@ let folds: Record<string, Fold[]> = {};
 let hoveredMark: string | undefined;
 // Notes just created with their card open: left empty, the mark goes too.
 const freshNotes = new Set<string>();
+// Claude's explanations (`paper.pdf.claude.md`) as received, and those shown, with their terms found.
+let explanations: Section[] = [];
+let shownExplanations: Section[] = [];
+let showExplanations = true;
+// Explanation cards opened (all start collapsed).
+const expanded = new Set<string>();
 // Pages near the viewport (rendered); others drop their canvas.
 const nearPages = new Set<PageView>();
 // Rows far from the viewport whose cards are laid out once they come near (zooming stays cheap).
@@ -234,7 +243,9 @@ async function loadPdf(url: string): Promise<void> {
   scale = fitScale();
   pages.forEach(sizePage);
   applySections(latestSections);
+  applyExplanations(explanations);
   pages.forEach((pv) => pageObserver.observe(pv.row));
+  reportView();
 }
 
 // ---------- Notes ----------
@@ -364,7 +375,7 @@ const cardObserver = new IntersectionObserver(
   (entries) => {
     for (const entry of entries) {
       const card = [...cards.values()].find((c) => c.el === entry.target);
-      if (entry.isIntersecting && card) {
+      if (entry.isIntersecting && card && !card.explain) {
         ensureEditor(card);
       }
     }
@@ -440,7 +451,7 @@ function applySections(sections: Section[]): void {
   ];
   const keys = new Set(shown.map((s) => s.key));
   for (const card of [...cards.values()]) {
-    if (!keys.has(card.key)) {
+    if (!card.explain && !keys.has(card.key)) {
       dropCard(card);
     }
   }
@@ -486,6 +497,13 @@ function renderMarks(): void {
       mark.dataset.key = section.key;
       mark.dataset.color = anchor.color;
       setCustomColor(mark, anchor.color);
+      Object.assign(mark.style, { left: `${r.x * 100}%`, top: `${r.y * 100}%`, width: `${r.w * 100}%`, height: `${r.h * 100}%` });
+    }
+  }
+  for (const section of shownExplanations) {
+    for (const r of section.anchor?.rects ?? []) {
+      const mark = el('div', 'mark explain', pageView(section.page)!.marks);
+      mark.dataset.key = explainKey(section);
       Object.assign(mark.style, { left: `${r.x * 100}%`, top: `${r.y * 100}%`, width: `${r.w * 100}%`, height: `${r.h * 100}%` });
     }
   }
@@ -539,6 +557,184 @@ function noteAt(pv: PageView, e: MouseEvent): Section | undefined {
     .filter((s) => s.anchor && s.page === pv.num)
     .sort((a, b) => top(b.anchor!) - top(a.anchor!))
     .find((s) => s.anchor!.rects.some((r) => x >= r.x - pad && x <= r.x + r.w + pad && y >= r.y - pad && y <= r.y + r.h + pad));
+}
+
+// The explained term under the pointer.
+function explanationAt(pv: PageView, e: MouseEvent): Section | undefined {
+  const { x, y } = pagePoint(pv, e);
+  return shownExplanations.find(
+    (s) => s.page === pv.num && s.anchor?.rects.some((r) => x >= r.x && x <= r.x + r.w && y >= r.y && y <= r.y + r.h),
+  );
+}
+
+// ---------- Explanations by Claude ----------
+
+const pageTexts = new Map<number, Promise<{ text: string; at: { item: TextItem; i: number }[] }>>();
+
+// The page's text without whitespace (lower case), with the text item and index of every character.
+function pageText(pv: PageView): Promise<{ text: string; at: { item: TextItem; i: number }[] }> {
+  let result = pageTexts.get(pv.num);
+  if (!result) {
+    result = pv.page.getTextContent().then((content) => {
+      let text = '';
+      const at: { item: TextItem; i: number }[] = [];
+      for (const item of content.items) {
+        if (!('str' in item)) {
+          continue;
+        }
+        [...item.str].forEach((ch, i) => {
+          const lower = ch.toLowerCase();
+          if (!/\s/.test(ch)) {
+            text += lower.length === 1 ? lower : ch;
+            at.push({ item, i });
+          }
+        });
+      }
+      return { text, at };
+    });
+    pageTexts.set(pv.num, result);
+  }
+  return result;
+}
+
+// Rectangles of the first occurrence of `term` on the page (whitespace and case ignored), one per
+// text item; empty if it isn't there.
+async function findText(pv: PageView, term: string): Promise<Rect[]> {
+  const { text, at } = await pageText(pv);
+  const needle = term.replace(/\s+/g, '').toLowerCase();
+  const start = needle ? text.indexOf(needle) : -1;
+  if (start === -1) {
+    return [];
+  }
+  const runs = new Map<TextItem, { from: number; to: number }>();
+  for (const { item, i } of at.slice(start, start + needle.length)) {
+    const run = runs.get(item);
+    if (run) {
+      run.to = i + 1;
+    } else {
+      runs.set(item, { from: i, to: i + 1 });
+    }
+  }
+  const viewport = pv.page.getViewport({ scale: 1 });
+  return [...runs].map(([item, { from, to }]) => {
+    const [, , c, d, e, f] = item.transform;
+    const height = item.height || Math.hypot(c, d);
+    const length = item.str.length || 1;
+    const [ax, ay] = viewport.convertToViewportPoint(e + (item.width * from) / length, f - height * 0.2);
+    const [bx, by] = viewport.convertToViewportPoint(e + (item.width * to) / length, f + height * 0.85);
+    return {
+      x: Math.min(ax, bx) / viewport.width,
+      y: Math.min(ay, by) / viewport.height,
+      w: Math.abs(bx - ax) / viewport.width,
+      h: Math.abs(by - ay) / viewport.height,
+    };
+  });
+}
+
+function explainKey(section: Section): string {
+  return `explain:${section.key}`;
+}
+
+let explainRun = 0;
+
+// Shows the explanations as collapsed cards; terms not found on their page are shown like a
+// slide explanation (no mark).
+async function applyExplanations(sections: Section[]): Promise<void> {
+  explanations = sections;
+  if (pages.length === 0) {
+    return;
+  }
+  const run = ++explainRun;
+  const wanted = showExplanations ? sections.filter((s) => pageView(s.page) && s.body.trim()) : [];
+  const shown = await Promise.all(
+    wanted.map(async (s) => {
+      const rects = s.anchor ? await findText(pageView(s.page)!, s.label) : [];
+      return { ...s, anchor: rects.length > 0 ? { page: s.page, rects, area: false, color: 'explain' } : undefined };
+    }),
+  );
+  if (run !== explainRun) {
+    return;
+  }
+  shownExplanations = shown;
+  const keys = new Set(shown.map(explainKey));
+  for (const card of [...cards.values()]) {
+    if (card.explain && !keys.has(card.key)) {
+      dropCard(card);
+    }
+  }
+  for (const section of shown) {
+    updateExplainCard(cards.get(explainKey(section)) ?? createExplainCard(section), section);
+  }
+  renderMarks();
+  layoutAll();
+}
+
+function createExplainCard(section: Section): Card {
+  const cardEl = el('div', 'card explain');
+  const head = el('div', 'card-head', cardEl);
+  el('span', 'card-label', head);
+  const adopt = el('button', 'card-adopt', head);
+  adopt.title = 'Keep as own note';
+  adopt.textContent = '+';
+  const del = el('button', 'card-delete', head);
+  del.title = 'Dismiss explanation';
+  del.textContent = '×';
+  const body = el('div', 'card-body', cardEl);
+  const card: Card = { key: explainKey(section), section, el: cardEl, body, source: '', sent: [], explain: true };
+  pageView(section.page)!.margin.append(cardEl);
+
+  head.addEventListener('mousedown', (e) => {
+    e.preventDefault();
+    if (e.target === adopt) {
+      const { anchor, page } = card.section;
+      post({ type: 'adoptExplanation', key: card.section.key, rects: anchor?.rects ?? null, color: randomColor(page) });
+    } else if (e.target === del) {
+      post({ type: 'deleteExplanation', key: card.section.key });
+    } else {
+      toggleExplanation(card);
+    }
+  });
+  cardEl.addEventListener('mouseenter', () => setHover(card.key));
+  cardEl.addEventListener('mouseleave', () => setHover(undefined));
+  new ResizeObserver(() => scheduleLayout(pageView(card.section.page)!)).observe(cardEl);
+  cards.set(card.key, card);
+  return card;
+}
+
+// First paragraph as plain text, shown while the card is collapsed.
+function summary(markdown: string): string {
+  const first = markdown.trim().split(/\n\s*\n/)[0];
+  return first.replace(/!\[[^\]]*\]\([^)]*\)/g, '').replace(/\[([^\]]*)\]\([^)]*\)/g, '$1').replace(/[*_`$>#]/g, '').replace(/\s+/g, ' ').trim();
+}
+
+function updateExplainCard(card: Card, section: Section): void {
+  card.section = section;
+  const term = section.label;
+  const label = card.el.querySelector('.card-label') as HTMLElement;
+  const open = expanded.has(card.key);
+  card.el.classList.toggle('collapsed', !open);
+  label.textContent = open ? term || 'About this slide' : term ? `${term}: ${summary(section.body)}` : summary(section.body);
+  label.title = open ? '' : summary(section.body);
+  if (section.body !== card.source) {
+    card.source = section.body;
+    card.editor?.setMarkdown(section.body);
+  }
+}
+
+// The full explanation is a read-only editor, created on first expanding.
+async function toggleExplanation(card: Card): Promise<void> {
+  if (expanded.delete(card.key)) {
+    updateExplainCard(card, card.section);
+    return;
+  }
+  expanded.add(card.key);
+  updateExplainCard(card, card.section);
+  card.creating ??= createNoteEditor(card.body, card.source, () => {}).then((editor) => {
+    editor.crepe.setReadonly(true);
+    card.editor = editor;
+    return editor;
+  });
+  await card.creating;
 }
 
 // ---------- Layout of the margin ----------
@@ -770,6 +966,27 @@ function pageInView(): PageView | undefined {
   return pages.reduce<PageView | undefined>((best, pv) => (!best || visible(pv) > visible(best) ? pv : best), undefined);
 }
 
+// Tells the extension which page is in view (the explain command starts there).
+let viewTimer: number | undefined;
+function reportView(): void {
+  clearTimeout(viewTimer);
+  viewTimer = window.setTimeout(() => post({ type: 'view', page: pageInView()?.num ?? 1, pages: pages.length }), 300);
+}
+window.addEventListener('scroll', reportView);
+
+// Plain text of every page, for choosing slides by topic.
+async function allPageTexts(): Promise<string[]> {
+  return Promise.all(
+    pages.map(async (pv) =>
+      (await pv.page.getTextContent()).items
+        .map((item) => ('str' in item ? item.str : ''))
+        .join(' ')
+        .replace(/\s+/g, ' ')
+        .trim(),
+    ),
+  );
+}
+
 function askClaude(): void {
   const current = pdfSelection();
   if (current) {
@@ -843,8 +1060,11 @@ viewer.addEventListener('click', (e) => {
     return;
   }
   const note = noteAt(pv, e);
+  const explained = note ? undefined : explanationAt(pv, e);
   if (note) {
     openNote(note, false);
+  } else if (explained) {
+    toggleExplanation(cards.get(explainKey(explained))!);
   }
 });
 
@@ -853,9 +1073,10 @@ viewer.addEventListener('mousemove', (e) => {
   hoveredMark = undefined;
   if (pv) {
     const note = noteAt(pv, e);
-    setHover(note?.key);
+    const explained = note ? undefined : explanationAt(pv, e);
+    setHover(note?.key ?? (explained && explainKey(explained)));
     hoveredMark = note?.key;
-    pv.pageEl.classList.toggle('over-mark', !!note);
+    pv.pageEl.classList.toggle('over-mark', !!note || !!explained);
   }
 });
 viewer.addEventListener('mouseleave', () => (hoveredMark = undefined));
@@ -987,11 +1208,23 @@ window.addEventListener('message', async (event) => {
       distUri = msg.distUri;
       notesWidth = msg.notesWidth;
       latestSections = msg.sections;
+      explanations = msg.explanations;
+      showExplanations = msg.showExplanations;
       folds = msg.folds;
       await loadPdf(msg.pdfUrl);
       break;
     case 'notes':
       applySections(msg.sections);
+      break;
+    case 'requestPageTexts':
+      post({ type: 'pageTexts', texts: await allPageTexts() });
+      break;
+    case 'explanations':
+      applyExplanations(msg.sections);
+      break;
+    case 'showExplanations':
+      showExplanations = msg.show;
+      applyExplanations(explanations);
       break;
     case 'notesWidth':
       notesWidth = msg.width;

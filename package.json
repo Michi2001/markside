@@ -101,6 +101,30 @@
         "icon": "$(screen-full)"
       },
       {
+        "command": "mdLive.toggleExplanations",
+        "title": "Hide Claude's Explanations",
+        "category": "Markdown Live",
+        "icon": "$(lightbulb)"
+      },
+      {
+        "command": "mdLive.toggleExplanations.off",
+        "title": "Show Claude's Explanations",
+        "category": "Markdown Live",
+        "icon": "$(lightbulb-empty)"
+      },
+      {
+        "command": "mdLive.explainSlides",
+        "title": "Explain Slides with Claude…",
+        "category": "Markdown Live",
+        "icon": "$(sparkle)"
+      },
+      {
+        "command": "mdLive.explainSlides.running",
+        "title": "Claude Is Explaining Slides… (Stop)",
+        "category": "Markdown Live",
+        "icon": "$(loading~spin)"
+      },
+      {
         "command": "mdLive.chooseTheme",
         "title": "Choose Color Mode",
         "category": "Markdown Live",
@@ -151,6 +175,26 @@
           "group": "navigation@3"
         },
         {
+          "command": "mdLive.explainSlides",
+          "when": "activeCustomEditorId == mdLive.pdf && !mdLive.explaining",
+          "group": "navigation@2"
+        },
+        {
+          "command": "mdLive.explainSlides.running",
+          "when": "activeCustomEditorId == mdLive.pdf && mdLive.explaining",
+          "group": "navigation@2"
+        },
+        {
+          "command": "mdLive.toggleExplanations",
+          "when": "activeCustomEditorId == mdLive.pdf && config.mdLive.pdfExplanations",
+          "group": "navigation@2"
+        },
+        {
+          "command": "mdLive.toggleExplanations.off",
+          "when": "activeCustomEditorId == mdLive.pdf && !config.mdLive.pdfExplanations",
+          "group": "navigation@2"
+        },
+        {
           "command": "mdLive.chooseTheme",
           "when": "(activeCustomEditorId == mdLive.editor || activeCustomEditorId == mdLive.pdf)",
           "group": "navigation@4"
@@ -199,6 +243,22 @@
           "when": "false"
         },
         {
+          "command": "mdLive.toggleExplanations",
+          "when": "activeCustomEditorId == mdLive.pdf"
+        },
+        {
+          "command": "mdLive.toggleExplanations.off",
+          "when": "false"
+        },
+        {
+          "command": "mdLive.explainSlides",
+          "when": "activeCustomEditorId == mdLive.pdf"
+        },
+        {
+          "command": "mdLive.explainSlides.running",
+          "when": "false"
+        },
+        {
           "command": "mdLive.chooseTheme",
           "when": "(activeCustomEditorId == mdLive.editor || activeCustomEditorId == mdLive.pdf)"
         },
@@ -239,6 +299,11 @@
           "minimum": 200,
           "maximum": 1200,
           "description": "Space reserved for the notes column next to PDFs when fitting the pages at 100 % zoom (px). The column always fills the rest of the window; zooming magnifies notes and pages together."
+        },
+        "mdLive.pdfExplanations": {
+          "type": "boolean",
+          "default": true,
+          "description": "Show Claude's explanations of the slides (paper.pdf.claude.md, written by the explain-slides skill) next to PDFs."
         },
         "mdLive.drawingDevice": {
           "type": "string",

@@ -9,6 +9,8 @@
   --line-red: #f0506e;
   --line-green: #3cb35a;
   --line-blue: #468cff;
+  /* Claude's explanations: neutral slate, distinct from the highlight colors. */
+  --explain: #6f86a6;
 }
 
 /* Left/right padding: VIEWER_PADDING in main.ts. */
@@ -168,6 +170,18 @@ body.alt .page .textLayer span {
 .mark.area[data-color='blue'] { outline-color: var(--line-blue); }
 .mark.area[data-color^='h'] { outline-color: var(--line-custom); }
 
+/* Explained terms: dotted underline instead of a highlight. */
+.mark.explain {
+  background: none;
+  mix-blend-mode: normal;
+  border-radius: 0;
+  border-bottom: 2px dotted var(--explain);
+}
+
+.mark.explain.hover {
+  border-bottom-style: solid;
+}
+
 .mark.hover {
   filter: saturate(2.2);
 }
@@ -207,6 +221,11 @@ body.alt .page .textLayer span {
 .lines path[data-color='green'] { stroke: var(--line-green); }
 .lines path[data-color='blue'] { stroke: var(--line-blue); }
 .lines path[data-color^='h'] { stroke: var(--line-custom); }
+
+.lines path[data-color='explain'] {
+  stroke: var(--explain);
+  stroke-dasharray: 3 3;
+}
 
 .lines path.hover,
 .lines path.focus {
@@ -432,4 +451,58 @@ body.alt .page .textLayer span {
 
 .popover .dot:hover {
   border-color: var(--vscode-editor-foreground);
+}
+
+/* ---------- Explanation cards (Claude) ---------- */
+
+.card.explain {
+  --card-color: var(--explain);
+  background: color-mix(in srgb, var(--explain) 7%, var(--vscode-editorWidget-background, var(--vscode-editor-background)));
+}
+
+.card.explain .card-head {
+  padding: 3px 4px 3px 10px;
+  font-size: 11px;
+}
+
+.card.explain .card-label {
+  -webkit-line-clamp: 1;
+  font-style: normal;
+  line-height: 18px;
+}
+
+.card.explain .card-label::before {
+  content: '💡 ';
+}
+
+.card.explain:not(.collapsed) .card-label {
+  font-weight: 600;
+}
+
+.card.explain.collapsed .card-body {
+  display: none;
+}
+
+.card-adopt {
+  flex: none;
+  width: 18px;
+  height: 18px;
+  padding: 0;
+  border: none;
+  border-radius: 4px;
+  background: none;
+  color: inherit;
+  font-size: 15px;
+  line-height: 18px;
+  cursor: pointer;
+  opacity: 0;
+}
+
+.card:hover .card-adopt {
+  opacity: 0.7;
+}
+
+.card-adopt:hover {
+  opacity: 1;
+  background: var(--vscode-list-hoverBackground);
 }

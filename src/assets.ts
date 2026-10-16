@@ -40,6 +40,11 @@ export function notesUri(pdf: vscode.Uri): vscode.Uri {
   return pdf.with({ path: pdf.path + '.md' });
 }
 
+// Claude's explanations of a PDF's slides: `paper.pdf` → `paper.pdf.claude.md`.
+export function explanationsUri(pdf: vscode.Uri): vscode.Uri {
+  return pdf.with({ path: pdf.path + '.claude.md' });
+}
+
 function isPdf(uri: vscode.Uri): boolean {
   return uri.path.toLowerCase().endsWith('.pdf');
 }
@@ -179,10 +184,14 @@ export function registerAssetSync(): vscode.Disposable {
   return vscode.Disposable.from(
     vscode.workspace.onDidRenameFiles(async (e) => {
       for (const { oldUri, newUri } of e.files) {
-        // The notes of a PDF follow it; renaming them in turn moves their assets folder.
-        if (isPdf(oldUri) && isPdf(newUri) && (await exists(notesUri(oldUri))) && !(await exists(notesUri(newUri)))) {
+        // The notes and explanations of a PDF follow it; renaming the notes in turn moves their assets folder.
+        if (isPdf(oldUri) && isPdf(newUri)) {
           const edit = new vscode.WorkspaceEdit();
-          edit.renameFile(notesUri(oldUri), notesUri(newUri));
+          for (const companion of [notesUri, explanationsUri]) {
+            if ((await exists(companion(oldUri))) && !(await exists(companion(newUri)))) {
+              edit.renameFile(companion(oldUri), companion(newUri));
+            }
+          }
           await vscode.workspace.applyEdit(edit);
           continue;
         }
@@ -205,8 +214,9 @@ export function registerAssetSync(): vscode.Disposable {
       }
     }),
     vscode.workspace.onDidDeleteFiles(async (e) => {
-      // A deleted PDF takes its notes file (and thus its assets folder) along.
-      const notes = await Promise.all(e.files.filter(isPdf).map(async (pdf) => ((await exists(notesUri(pdf))) ? [notesUri(pdf)] : [])));
+      // A deleted PDF takes its notes file (and thus its assets folder) and explanations along.
+      const companions = e.files.filter(isPdf).flatMap((pdf) => [notesUri(pdf), explanationsUri(pdf)]);
+      const notes = await Promise.all(companions.map(async (uri) => ((await exists(uri)) ? [uri] : [])));
       for (const uri of notes.flat()) {
         await fs.delete(uri, { useTrash: true });
       }

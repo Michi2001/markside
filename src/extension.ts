@@ -22,12 +22,17 @@ export function activate(context: vscode.ExtensionContext): void {
   );
   const fontSizes = new FontSizes(context.globalState);
   const provider = new LiveEditorProvider(context.extensionUri, drawingServer, fontSizes);
+  const pdfProvider = new PdfEditorProvider(context.extensionUri, drawingServer, fontSizes);
+  const toggleExplanations = () => {
+    const config = vscode.workspace.getConfiguration('mdLive');
+    return config.update('pdfExplanations', !config.get<boolean>('pdfExplanations', true), vscode.ConfigurationTarget.Global);
+  };
 
   context.subscriptions.push(
     vscode.window.registerCustomEditorProvider(LiveEditorProvider.viewType, provider, {
       webviewOptions: { retainContextWhenHidden: true },
     }),
-    vscode.window.registerCustomEditorProvider(PdfEditorProvider.viewType, new PdfEditorProvider(context.extensionUri, drawingServer, fontSizes), {
+    vscode.window.registerCustomEditorProvider(PdfEditorProvider.viewType, pdfProvider, {
       webviewOptions: { retainContextWhenHidden: true },
       // Split view on the same PDF; every panel syncs through the shared notes TextDocument.
       supportsMultipleEditorsPerDocument: true,
@@ -43,6 +48,11 @@ export function activate(context: vscode.ExtensionContext): void {
     ),
     vscode.commands.registerCommand('mdLive.insertDrawing', () => provider.postToActivePanel('insertDrawing')),
     vscode.commands.registerCommand('mdLive.chooseTheme', chooseTheme),
+    // Two variants each, so the editor title shows the state (shown/hidden, running).
+    vscode.commands.registerCommand('mdLive.toggleExplanations', toggleExplanations),
+    vscode.commands.registerCommand('mdLive.toggleExplanations.off', toggleExplanations),
+    vscode.commands.registerCommand('mdLive.explainSlides', () => pdfProvider.explainSlides()),
+    vscode.commands.registerCommand('mdLive.explainSlides.running', () => pdfProvider.explainSlides()),
     vscode.commands.registerCommand('mdLive.chooseFontSize', () => chooseFontSize(fontSizes)),
     // Before the rename, so the reopened editor already finds the note's size.
     vscode.workspace.onWillRenameFiles((e) => e.waitUntil(Promise.all(e.files.map((f) => fontSizes.rename(f.oldUri, f.newUri))))),
