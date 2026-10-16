@@ -11,10 +11,12 @@ export function activate(context: vscode.ExtensionContext): void {
     token = crypto.randomBytes(16).toString('hex');
     context.globalState.update('ipadToken', token);
   }
-  const drawingServer = new DrawingServer(vscode.Uri.joinPath(context.extensionUri, 'dist'), token);
-  // Runs while drawings go to the iPad, so the page there can stay connected.
-  const syncServer = (): void => (getDrawingDevice() === 'ipad' ? drawingServer.start() : drawingServer.stop());
-  syncServer();
+  // Started on demand (drawing request, showing the address) and stopped again when idle.
+  const drawingServer = new DrawingServer(
+    vscode.Uri.joinPath(context.extensionUri, 'dist'),
+    token,
+    vscode.Uri.joinPath(context.globalStorageUri, 'sidecar-browser').fsPath,
+  );
   const provider = new LiveEditorProvider(context.extensionUri, drawingServer);
 
   context.subscriptions.push(
@@ -32,11 +34,13 @@ export function activate(context: vscode.ExtensionContext): void {
     ),
     vscode.commands.registerCommand('mdLive.insertDrawing', () => provider.postToActivePanel('insertDrawing')),
     vscode.commands.registerCommand('mdLive.chooseTheme', chooseTheme),
+    vscode.commands.registerCommand('mdLive.chooseDrawingDevice', chooseDrawingDevice),
+    ...registerDeviceStatus(),
     vscode.commands.registerCommand('mdLive.showIpadUrl', () => showIpadUrl(drawingServer)),
     vscode.workspace.onDidChangeConfiguration((e) => {
+      // Restarted on the next request (sidecar listens on another interface).
       if (e.affectsConfiguration('mdLive.drawingDevice') || e.affectsConfiguration('mdLive.ipadPort')) {
         drawingServer.stop();
-        syncServer();
       }
     }),
     drawingServer,
@@ -48,6 +52,8 @@ async function showIpadUrl(server: DrawingServer): Promise<void> {
   if (getDrawingDevice() !== 'ipad') {
     await vscode.workspace.getConfiguration('mdLive').update('drawingDevice', 'ipad', vscode.ConfigurationTarget.Global);
   }
+  // Runs for a while, so the page can be opened and bookmarked on the iPad.
+  server.start();
   const url = await vscode.window.showQuickPick(server.urls(), {
     placeHolder: 'Copy the address for the iPad (the .local name keeps working when the IP changes)',
   });
@@ -58,6 +64,45 @@ async function showIpadUrl(server: DrawingServer): Promise<void> {
 }
 
 export function deactivate(): void {}
+
+const DEVICES = [
+  { label: '$(device-desktop) Mac', description: 'Draw in the editor window', value: 'mac' },
+  { label: '$(device-mobile) iPad', description: 'Safari on the iPad (same network)', value: 'ipad' },
+  { label: '$(screen-full) Sidecar', description: 'Full screen window on the Sidecar display', value: 'sidecar' },
+];
+
+async function chooseDrawingDevice(): Promise<void> {
+  const current = getDrawingDevice();
+  const items = DEVICES.map((d) => ({ ...d, picked: d.value === current }));
+  const picked = await vscode.window.showQuickPick(items, { placeHolder: 'Where handwriting (Alt+D) opens' });
+  if (picked) {
+    await vscode.workspace.getConfiguration('mdLive').update('drawingDevice', picked.value, vscode.ConfigurationTarget.Global);
+  }
+}
+
+// Status bar entry showing the drawing device while a live editor is active; click to switch.
+function registerDeviceStatus(): vscode.Disposable[] {
+  const item = vscode.window.createStatusBarItem(vscode.StatusBarAlignment.Right, 100);
+  item.command = 'mdLive.chooseDrawingDevice';
+  item.tooltip = 'Drawing device for handwriting (click to switch)';
+  const update = (): void => {
+    const input = vscode.window.tabGroups.activeTabGroup.activeTab?.input;
+    if (!(input instanceof vscode.TabInputCustom && input.viewType === LiveEditorProvider.viewType)) {
+      item.hide();
+      return;
+    }
+    const device = DEVICES.find((d) => d.value === getDrawingDevice()) ?? DEVICES[0];
+    item.text = `$(edit) ${device.label.replace(/^\$\([^)]*\) /, '')}`;
+    item.show();
+  };
+  update();
+  return [
+    item,
+    vscode.window.tabGroups.onDidChangeTabs(update),
+    vscode.window.tabGroups.onDidChangeTabGroups(update),
+    vscode.workspace.onDidChangeConfiguration((e) => e.affectsConfiguration('mdLive.drawingDevice') && update()),
+  ];
+}
 
 async function chooseTheme(): Promise<void> {
   const items = [

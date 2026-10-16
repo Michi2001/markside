@@ -56,6 +56,12 @@
         "category": "Markdown Live"
       },
       {
+        "command": "mdLive.chooseDrawingDevice",
+        "title": "Choose Drawing Device",
+        "category": "Markdown Live",
+        "icon": "$(device-mobile)"
+      },
+      {
         "command": "mdLive.chooseTheme",
         "title": "Choose Color Mode",
         "category": "Markdown Live",
@@ -85,6 +91,11 @@
           "group": "navigation@3"
         },
         {
+          "command": "mdLive.chooseDrawingDevice",
+          "when": "activeCustomEditorId == mdLive.editor",
+          "group": "navigation@3"
+        },
+        {
           "command": "mdLive.chooseTheme",
           "when": "activeCustomEditorId == mdLive.editor",
           "group": "navigation@4"
@@ -105,6 +116,10 @@
         },
         {
           "command": "mdLive.insertDrawing",
+          "when": "activeCustomEditorId == mdLive.editor"
+        },
+        {
+          "command": "mdLive.chooseDrawingDevice",
           "when": "activeCustomEditorId == mdLive.editor"
         },
         {
@@ -135,14 +150,21 @@
           "type": "string",
           "enum": [
             "mac",
-            "ipad"
+            "ipad",
+            "sidecar"
           ],
           "default": "mac",
           "enumDescriptions": [
             "Draw in the editor window.",
-            "Draw on an iPad: open the address from 'Draw on iPad: Show Address' in Safari there (same network)."
+            "Draw on an iPad: open the address from 'Draw on iPad: Show Address' in Safari there (same network).",
+            "Draw in a browser window on the Sidecar display (opened full screen in its own Chrome window if Chrome is installed); the server is only reachable from the Mac itself."
           ],
           "description": "Where the handwriting canvas (Alt+D, double-click on a drawing) opens."
+        },
+        "mdLive.sidecarIpad": {
+          "type": "string",
+          "default": "",
+          "description": "Name of the iPad that Sidecar mode connects to automatically when no Sidecar display is present (as listed under Displays in Control Center, e.g. 'iPad von Michael'; a trailing number like ' (6)' is optional). Empty: never connect automatically."
         },
         "mdLive.ipadPort": {
           "type": "number",

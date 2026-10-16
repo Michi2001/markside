@@ -19,6 +19,13 @@
   -webkit-touch-callout: none;
 }
 
+/* Under Sidecar the Pencil moves the Mac's pointer; hide it (crosshair, arrow) so only the ink shows. */
+html,
+body,
+body * {
+  cursor: none !important;
+}
+
 html,
 body {
   margin: 0;

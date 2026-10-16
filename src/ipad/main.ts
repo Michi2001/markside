@@ -23,21 +23,34 @@ document.addEventListener('gesturestart', (e) => e.preventDefault());
 document.addEventListener('selectstart', (e) => e.preventDefault());
 document.addEventListener('contextmenu', (e) => e.preventDefault());
 
-const events = new EventSource('events');
-events.onopen = () => (status.textContent = 'Connected. Waiting for a drawing request from the Mac (Alt+D) …');
-events.onerror = () => (status.textContent = 'Not connected to the Mac – retrying …');
-events.addEventListener('draw', (e) => {
-  const { id, drawing } = JSON.parse((e as MessageEvent).data);
-  // Reconnects resend the pending request; keep the open canvas in that case.
-  if (id === currentId) {
-    return;
-  }
-  abort?.abort();
-  draw(id, drawing);
-});
-events.addEventListener('cancel', (e) => {
-  if (JSON.parse((e as MessageEvent).data).id === currentId) {
-    currentId = 0;
+// The Mac only runs the server on demand (Alt+D, double-click), so the page keeps reconnecting.
+// EventSource retries by itself, but Safari gives up (CLOSED) when the server is unreachable.
+const RECONNECT_MS = 3000;
+
+function connect(): void {
+  const events = new EventSource('events');
+  events.onopen = () => (status.textContent = 'Connected. Waiting for a drawing request from the Mac (Alt+D) …');
+  events.onerror = () => {
+    status.textContent = 'Waiting for the Mac – Alt+D or a double-click on a drawing/image there starts the connection …';
+    if (events.readyState === EventSource.CLOSED) {
+      setTimeout(connect, RECONNECT_MS);
+    }
+  };
+  events.addEventListener('draw', (e) => {
+    const { id, drawing } = JSON.parse((e as MessageEvent).data);
+    // Reconnects resend the pending request; keep the open canvas in that case.
+    if (id === currentId) {
+      return;
+    }
     abort?.abort();
-  }
-});
+    draw(id, drawing);
+  });
+  events.addEventListener('cancel', (e) => {
+    if (JSON.parse((e as MessageEvent).data).id === currentId) {
+      currentId = 0;
+      abort?.abort();
+    }
+  });
+}
+
+connect();

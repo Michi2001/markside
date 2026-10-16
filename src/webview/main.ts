@@ -25,7 +25,8 @@ let lastSynced = '';
 let uploadCounter = 0;
 const pendingUploads = new Map<number, (path: string) => void>();
 const pendingDrawings = new Map<number, (path: string | null) => void>();
-// Setting mdLive.drawingDevice: draw in this webview ('mac') or on the iPad page ('ipad').
+// Setting mdLive.drawingDevice: draw in this webview ('mac') or on the drawing page served by the
+// extension, opened on the iPad ('ipad') or in a browser window on the Mac ('sidecar').
 let drawingDevice = 'mac';
 
 // Relative image paths in the note are resolved against the note's folder (as a webview URI).
@@ -74,8 +75,8 @@ async function drawLocally(drawing: Drawing): Promise<string | null> {
   return result && saveFile(drawingFile(result));
 }
 
-// The extension sends the drawing to the iPad and saves the result.
-function drawOnIpad(drawing: Drawing): Promise<string | null> {
+// The extension sends the drawing to the drawing page (iPad or browser window) and saves the result.
+function drawRemotely(drawing: Drawing): Promise<string | null> {
   const id = ++uploadCounter;
   vscode.postMessage({ type: 'drawRemote', id, drawing });
   return new Promise((resolve) => pendingDrawings.set(id, resolve));
@@ -90,7 +91,7 @@ async function editDrawing(src?: string, getPos?: () => number | undefined, widt
     : isDrawing(src)
       ? await loadDrawing(resolveUrl(src))
       : await imageDrawing(resolveUrl(src), width!, nodeWidth!);
-  const path = drawingDevice === 'ipad' ? await drawOnIpad(drawing) : await drawLocally(drawing);
+  const path = drawingDevice === 'mac' ? await drawLocally(drawing) : await drawRemotely(drawing);
   if (!path) {
     getView().focus();
     return;
