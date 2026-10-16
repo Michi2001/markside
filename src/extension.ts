@@ -29,6 +29,8 @@ export function activate(context: vscode.ExtensionContext): void {
     }),
     vscode.window.registerCustomEditorProvider(PdfEditorProvider.viewType, new PdfEditorProvider(context.extensionUri, drawingServer, fontSizes), {
       webviewOptions: { retainContextWhenHidden: true },
+      // Split view on the same PDF; every panel syncs through the shared notes TextDocument.
+      supportsMultipleEditorsPerDocument: true,
     }),
     vscode.commands.registerCommand('mdLive.open', (uri?: vscode.Uri) =>
       switchEditor(uri, LiveEditorProvider.viewType),

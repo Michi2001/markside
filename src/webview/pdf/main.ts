@@ -16,8 +16,8 @@ import './pdf.css';
 
 // The notes column fills the space right of the page up to the window edge, at least MIN_NOTES_WIDTH
 // (in the column's own units); fitting the pages leaves notesWidth (setting mdLive.pdfNotesWidth) for
-// it at 100 %. Zooming magnifies the notes like the pages (CSS zoom on the column), so the note's font
-// size stays its size at 100 %.
+// it at 100 %. Zooming magnifies the notes like the pages (CSS zoom on the column, `notesZoom`), so the
+// note's font size stays its size at 100 %.
 const MIN_NOTES_WIDTH = 200;
 const GAP = 24;
 // Left and right padding of #viewer.
@@ -39,6 +39,9 @@ type Card = {
   creating?: Promise<NoteEditor>;
   // Body (without the area snapshot) last exchanged with the extension.
   source: string;
+  // Bodies this card sent recently: a `notes` message carrying one of them is a late echo and must
+  // not reset the editor while typing (macOS dictation would insert its phrase a second time).
+  sent: string[];
 };
 
 // The snapshot image at the start of an area note stays in the file (for Claude) but is not shown in
@@ -99,13 +102,19 @@ function fitScale(): number {
   return fit * zoom;
 }
 
+// Zoom of the notes column: the user zoom, but when zooming in (in a narrow window, e.g. split view,
+// where the pages start out small) the notes only grow once the pages are larger than their PDF size.
+function notesZoom(): number {
+  return zoom <= 1 ? zoom : Math.min(zoom, Math.max(1, scale));
+}
+
 function sizePage(pv: PageView): void {
   pv.pageEl.style.width = `${pv.width * scale}px`;
   pv.pageEl.style.height = `${pv.height * scale}px`;
   pv.pageEl.style.setProperty('--total-scale-factor', String(scale));
   const free = viewer.clientWidth - VIEWER_PADDING - GAP - pv.width * scale;
-  pv.margin.style.width = `${Math.max(MIN_NOTES_WIDTH, free / zoom)}px`;
-  pv.margin.style.zoom = String(zoom);
+  pv.margin.style.width = `${Math.max(MIN_NOTES_WIDTH, free / notesZoom())}px`;
+  pv.margin.style.zoom = String(notesZoom());
 }
 
 async function renderPage(pv: PageView): Promise<void> {
@@ -257,7 +266,7 @@ function createCard(section: Section): Card {
   del.title = 'Delete note';
   del.textContent = '×';
   const body = el('div', 'card-body', cardEl);
-  const card: Card = { key: section.key, section, el: cardEl, body, source: splitBody(section).text };
+  const card: Card = { key: section.key, section, el: cardEl, body, source: splitBody(section).text, sent: [] };
   updateCard(card, section);
   body.textContent = card.source;
   pv.margin.append(cardEl);
@@ -333,6 +342,7 @@ function ensureEditor(card: Card): Promise<NoteEditor> {
       card.source,
       (markdown) => {
         card.source = markdown;
+        card.sent = [...card.sent.slice(-49), markdown];
         card.el.classList.toggle('empty', !markdown.trim());
         const { snapshot } = splitBody(card.section);
         const text = snapshot && markdown.trim() ? `${snapshot}\n\n${markdown}` : snapshot || markdown;
@@ -436,7 +446,7 @@ function applySections(sections: Section[]): void {
   for (const section of shown) {
     const card = cards.get(section.key) ?? createCard(section);
     const { text } = splitBody(section);
-    if (text !== card.source) {
+    if (text !== card.source && !card.sent.includes(text)) {
       card.source = text;
       if (card.editor) {
         // replaceAll drops the collapsed items, they are restored by text.
@@ -562,7 +572,7 @@ function layoutAll(): void {
 // lets the row grow when the notes are longer than the page.
 // Card positions are in the column's own units (before its zoom).
 function layoutRow(pv: PageView): void {
-  const pageHeight = (pv.height * scale) / zoom;
+  const pageHeight = (pv.height * scale) / notesZoom();
   let y = 0;
   const placed: { card: Card; top: number }[] = [];
   // Heights first, then positions: alternating reads and writes would force a layout per card.
@@ -595,7 +605,7 @@ function drawLines(pv: PageView, placed: { card: Card; top: number }[]): void {
     // Starts at the page edge, level with the mark, so it never runs across the page's text.
     const first = anchor.rects.reduce((a, b) => (b.y < a.y ? b : a));
     const sy = (first.y + first.h / 2) * pageHeight;
-    const ey = (cardTop + 14) * zoom;
+    const ey = (cardTop + 14) * notesZoom();
     const edge = pageWidth;
     const path = document.createElementNS('http://www.w3.org/2000/svg', 'path');
     path.setAttribute('d', `M${edge},${sy} C${edge + GAP / 2},${sy} ${x1 - GAP / 2},${ey} ${x1},${ey}`);
