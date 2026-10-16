@@ -21,7 +21,7 @@ Bearbeite Markdown-Dateien direkt in der gerenderten Ansicht (ähnlich Obsidian/
 
 ## Tastenkürzel
 
-Gelten nur, wenn der Live-Editor den Fokus hat. `Alt` ist auf dem Mac die `Option`-Taste. Die Formatierungs-Kürzel schalten um: nochmal drücken entfernt die Formatierung wieder.
+Gelten im Live-Editor und in den Notizen neben PDFs (dort nur in der Notiz, die den Fokus hat). `Alt` ist auf dem Mac die `Option`-Taste. Die Formatierungs-Kürzel schalten um: nochmal drücken entfernt die Formatierung wieder.
 
 In Stichpunktlisten wirken alle Kürzel außer `Alt+M` auf den ganzen Stichpunkt, in dem der Cursor steht – auch ohne oder mit nur teilweiser Markierung. Ausnahme Hervorheben (`Alt+Q/W/E/R/H`): ohne Markierung der ganze Stichpunkt, mit Markierung nur der markierte Text. Außerhalb von Listen gilt nur der markierte Text.
 
@@ -43,9 +43,21 @@ In Stichpunktlisten wirken alle Kürzel außer `Alt+M` auf den ganzen Stichpunkt
 | `Tab` / `Shift+Tab` | Stichpunkt ein-/ausrücken | – |
 | `Tab` / `Shift+Tab` in Überschrift | Überschrift eine Ebene tiefer/höher (H2 → H3 / H3 → H2) | – |
 
+### Im PDF
+
+Gelten für Text, der im PDF ausgewählt ist (nicht in einer Notiz).
+
+| Shortcut | Funktion | In `<datei>.pdf.md` |
+|---|---|---|
+| `Alt+Q` / `Alt+W` / `Alt+E` / `Alt+R` (`Alt+H` = gelb) | Text rot / gelb / grün / blau markieren | `### [Text](#p3=…&c=red)` (gelb ohne `&c=`) |
+| `Alt+Shift+Q` / `W` / `E` / `R`, `Alt+A` (gelb) oder Farbpunkt neben der Auswahl | Markieren und gleich eine Notiz dazu schreiben | Überschrift wie oben, darunter die Notiz |
+| `Alt` + Rechteck ziehen | Bereich markieren, Bild des Ausschnitts kommt in die Notiz | `### [Area](#p3=…&area)` |
+| `Ctrl`+Mausrad / Pinch | Seiten und Notizen zoomen | – |
+
 ## Bekannte Einschränkungen
 
 - **Kopieren zwischen verschiedenen Workspaces/VS-Code-Fenstern:** Beim Kopieren einer Notiz sucht die Extension die verlinkten Bilder nur im aktuell geöffneten Workspace und kopiert sie in den `.assets`-Ordner der Kopie. Liegt das Original in einem anderen Workspace (z. B. Kopieren aus einem anderen Repo bzw. VS-Code-Fenster), werden die Bilder nicht gefunden und die Links in der Kopie sind kaputt. Abhilfe: den `.assets`-Ordner im Finder mitkopieren, oder beide Ordner in einem Multi-Root-Workspace öffnen (dann werden alle Ordner durchsucht).
+- **PDF löschen:** Die Notizen eines PDFs (`<datei>.pdf.md` und `<datei>.pdf.assets/`) bleiben beim Löschen des PDFs liegen und müssen von Hand gelöscht werden; nur Umbenennen/Verschieben in VS Code zieht sie mit.
 - **Dateioperationen außerhalb von VS Code** (Finder, Terminal, git) bekommt die Extension nicht mit: Notiz und `<notiz>.assets/` müssen dort zusammen verschoben bzw. kopiert werden.
 
 ## Entwicklung
