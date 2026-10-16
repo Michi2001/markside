@@ -1,10 +1,14 @@
 import * as path from 'path';
 import * as vscode from 'vscode';
+import type { Fold } from './webview/fold';
 
 // Each note `foo.md` keeps its images in a sibling folder `foo.assets/`, linked relatively.
 const ASSETS_SUFFIX = '.assets';
 // Relative link to a sibling assets folder: `(foo.assets/123.png`, `"foo.assets/…`, `<foo.assets/…`.
 const ASSET_REF = /(?<=[("'<])([^\s/()"'<>]+)\.assets\/([\w.-]+)/g;
+
+// Collapsed headings of the note (view state of the live editor), kept with the images so it moves with the note.
+const FOLDS_FILE = '.folds.json';
 
 const MIME_EXTENSIONS: Record<string, string> = {
   'image/png': '.png',
@@ -58,6 +62,28 @@ export async function saveImage(note: vscode.Uri, name: string, mime: string, da
   return assetsRef(note) + fileName;
 }
 
+export async function loadFolds(note: vscode.Uri): Promise<Fold[]> {
+  const file = vscode.Uri.joinPath(assetsDir(note), FOLDS_FILE);
+  return (await exists(file)) ? JSON.parse(await readText(file)) : [];
+}
+
+// Writes the collapsed headings; with none left the file (and an otherwise empty folder) goes away.
+export async function saveFolds(note: vscode.Uri, folds: Fold[]): Promise<void> {
+  const dir = assetsDir(note);
+  const file = vscode.Uri.joinPath(dir, FOLDS_FILE);
+  if (folds.length > 0) {
+    await fs.createDirectory(dir);
+    await fs.writeFile(file, Buffer.from(JSON.stringify(folds)));
+    return;
+  }
+  if (await exists(file)) {
+    await fs.delete(file);
+    if ((await fs.readDirectory(dir)).length === 0) {
+      await fs.delete(dir, { recursive: true });
+    }
+  }
+}
+
 // Looks next to the note first; a note copied into another folder only finds its images via search.
 async function findAsset(note: vscode.Uri, folder: string, file: string, search: boolean): Promise<vscode.Uri | undefined> {
   const sibling = vscode.Uri.joinPath(note, '..', folder, file);
@@ -104,7 +130,7 @@ export async function cleanupAssets(document: vscode.TextDocument): Promise<void
   // Unsaved text counts too, so an image pasted right before closing survives until the save lands.
   const text = (await readText(document.uri)) + document.getText();
   for (const [name, type] of await fs.readDirectory(dir)) {
-    if (type === vscode.FileType.File && !text.includes(name)) {
+    if (type === vscode.FileType.File && name !== FOLDS_FILE && !text.includes(name)) {
       await fs.delete(vscode.Uri.joinPath(dir, name), { useTrash: true });
     }
   }

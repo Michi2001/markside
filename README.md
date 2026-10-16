@@ -33,6 +33,7 @@ In Stichpunktlisten wirken alle Kürzel außer `Alt+M` auf den ganzen Stichpunkt
 | `Alt+M` | Formel (auch: Formel anklicken → zurück zu Text) | `$Text$` |
 | `Alt+1` … `Alt+6` | Überschrift Ebene 1–6 (gleiche Ebene nochmal = normaler Text) | `# Text` … `###### Text` |
 | `Alt+^` | Überschrift aufheben (normaler Text) | – |
+| `Alt+Y` | Abschnitt der Überschrift ein-/ausklappen, in der der Cursor steht; in einem Unterstichpunkt nur diesen Stichpunkt (bzw. den übergeordneten, wenn er keine Unterpunkte hat). Eingeklapptes zeigt eine Pille mit der Anzahl ausgeblendeter Blöcke/Unterpunkte (Klick klappt auf), eingeklappte Stichpunkte zusätzlich einen Ring um den Punkt. Wird pro Notiz gemerkt | – (nur Ansicht) |
 | `Alt+K` | Markierung an Claude Code übergeben | – |
 | `Alt+D` | Handschrift/Zeichnung einfügen | Bildlink auf `notiz.assets/….drawing.svg` |
 | `Alt+↑` / `Alt+↓` | Stichpunkt bzw. Absatz nach oben/unten verschieben | – |

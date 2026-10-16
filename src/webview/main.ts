@@ -8,6 +8,7 @@ import type { EditorView } from '@milkdown/kit/prose/view';
 import { callCommand, insert, replaceAll } from '@milkdown/kit/utils';
 import { type Drawing, type DrawingFile, drawingFile, imageDrawing, isDrawing, isDrawingOpen, loadDrawing, openDrawingEditor } from './drawing';
 import { createImageBlockView, extendImageBlockSchema, remarkHtmlImages } from './imageView';
+import { type Fold, foldPlugin, getFolds, setFolds, toggleFold } from './fold';
 import { highlight } from './highlight';
 import { setHeading, shiftHeading } from './headings';
 import { indentListItems, moveBlocksKeymap } from './moveBlocks';
@@ -135,7 +136,7 @@ function sendSelection(): void {
   vscode.postMessage({ type: 'selection', text: state.doc.textBetween(from, to, '\n', ' ') });
 }
 
-async function createEditor(text: string): Promise<void> {
+async function createEditor(text: string, folds: Fold[]): Promise<void> {
   crepe = new Crepe({
     root,
     defaultValue: text,
@@ -169,7 +170,10 @@ async function createEditor(text: string): Promise<void> {
       vscode.postMessage({ type: 'edit', text: markdown });
     });
   });
-  crepe.editor.use(moveBlocksKeymap).use(highlight);
+  crepe.editor
+    .use(moveBlocksKeymap)
+    .use(highlight)
+    .use(foldPlugin((folds) => vscode.postMessage({ type: 'folds', folds })));
   await crepe.create();
   const view = getView();
   const crepeImageView = view.props.nodeViews!['image-block'];
@@ -177,6 +181,7 @@ async function createEditor(text: string): Promise<void> {
     nodeViews: { ...view.props.nodeViews, 'image-block': createImageBlockView(crepeImageView, resolveUrl, editDrawing) },
   });
   lastSynced = crepe.getMarkdown();
+  setFolds(view, folds);
 }
 
 root.addEventListener(
@@ -285,6 +290,12 @@ window.addEventListener(
       e.preventDefault();
       e.stopPropagation();
       sendSelection();
+    } else if (e.key === '¥' || e.key.toLowerCase() === 'y') {
+      // Matched by key (Option+Y types ¥ on Mac), so it is the Y key on QWERTZ and QWERTY alike.
+      e.preventDefault();
+      e.stopPropagation();
+      toggleFold(getView());
+      getView().focus();
     } else if (e.code === 'KeyD') {
       e.preventDefault();
       e.stopPropagation();
@@ -315,14 +326,17 @@ window.addEventListener('message', async (event) => {
       document.body.dataset.theme = msg.theme;
       document.body.style.setProperty('--mdlive-font-size', `${msg.fontSize}px`);
       drawingDevice = msg.drawingDevice;
-      await createEditor(msg.text);
+      await createEditor(msg.text, msg.folds);
       break;
     case 'update':
       if (!crepe) {
         return;
       }
+      // replaceAll drops the collapsed headings, so they are restored by heading text.
+      const folds = getFolds(getView().state);
       crepe.editor.action(replaceAll(msg.text));
       lastSynced = crepe.getMarkdown();
+      setFolds(getView(), folds);
       break;
     case 'theme':
       document.body.dataset.theme = msg.theme;

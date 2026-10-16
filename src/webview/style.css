@@ -214,3 +214,46 @@ body[data-theme='dark'] {
 .milkdown .milkdown-list-item-block li .label-wrapper .label {
   padding: 1px 0;
 }
+
+/* Alt+Y: collapsed heading sections */
+.milkdown .ProseMirror .mdlive-folded {
+  display: none;
+}
+
+/* Pill after a collapsed heading / list item; click expands it. */
+.milkdown .ProseMirror .mdlive-fold-badge {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.3em;
+  margin-left: 0.6em;
+  padding: 0 0.6em;
+  border-radius: 999px;
+  background: var(--vscode-badge-background);
+  color: var(--vscode-badge-foreground);
+  font-size: 0.75rem;
+  font-weight: 500;
+  line-height: 1.6;
+  vertical-align: middle;
+  white-space: nowrap;
+  cursor: pointer;
+  user-select: none;
+}
+
+.milkdown .ProseMirror .mdlive-fold-badge::before {
+  content: '';
+  border-left: 0.4em solid currentColor;
+  border-top: 0.28em solid transparent;
+  border-bottom: 0.28em solid transparent;
+}
+
+.milkdown .ProseMirror .mdlive-fold-badge:hover {
+  filter: brightness(1.15);
+}
+
+/* Collapsed list item: ring around its bullet (Workflowy/Logseq style). */
+.milkdown .ProseMirror .mdlive-collapsed-item > .list-item > .label-wrapper .bullet circle {
+  fill: var(--crepe-color-on-background);
+  stroke: var(--crepe-color-outline);
+  stroke-opacity: 0.45;
+  stroke-width: 7px;
+}

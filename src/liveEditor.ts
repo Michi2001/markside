@@ -1,6 +1,8 @@
 import * as vscode from 'vscode';
-import { adoptAssets, cleanupAssets, saveImage } from './assets';
+import { adoptAssets, cleanupAssets, loadFolds, saveFolds, saveImage } from './assets';
+import { preserveSource } from './preserve';
 import { DrawingServer, type DrawingFile, type DrawingTarget, getDrawingDevice } from './drawingServer';
+import type { Fold } from './webview/fold';
 
 const CLAUDE_MENTION_COMMAND = 'claude-vscode.insertAtMention';
 
@@ -17,6 +19,7 @@ type WebviewMessage =
   | { type: 'edit'; text: string }
   | { type: 'saveImage'; id: number; name: string; mime: string; data: string }
   | { type: 'selection'; text: string }
+  | { type: 'folds'; folds: Fold[] }
   | { type: 'drawRemote'; id: number; drawing: unknown; src: string | null };
 
 export class LiveEditorProvider implements vscode.CustomTextEditorProvider {
@@ -115,12 +118,19 @@ export class LiveEditorProvider implements vscode.CustomTextEditorProvider {
             theme: getTheme(),
             fontSize: getFontSize(),
             drawingDevice: getDrawingDevice(),
+            folds: await loadFolds(document.uri),
           });
           break;
+        case 'folds':
+          // Queued so quick successive writes (e.g. on an external update) land in order.
+          editQueue = editQueue.then(() => saveFolds(document.uri, msg.folds));
+          break;
         case 'edit': {
-          const text = document.eol === vscode.EndOfLine.CRLF ? msg.text.replace(/\r?\n/g, '\r\n') : msg.text;
-          webviewText = text;
+          const crlf = document.eol === vscode.EndOfLine.CRLF ? msg.text.replace(/\r?\n/g, '\r\n') : msg.text;
           editQueue = editQueue.then(async () => {
+            // Unchanged blocks keep their original formatting; the webview keeps showing its own serialization.
+            const text = preserveSource(document.getText(), crlf);
+            webviewText = text;
             await applyMinimalEdit(document, text);
             // Changes the document again (and thus the webview) only if foreign images were pasted.
             await applyMinimalEdit(document, await adoptAssets(document.uri, text));
