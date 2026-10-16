@@ -67,7 +67,8 @@ body[data-theme='dark'] {
   --crepe-color-selected: var(--vscode-list-inactiveSelectionBackground);
   --crepe-color-inline-area: var(--vscode-textCodeBlock-background);
 
-  --crepe-base-font-size: 16px;
+  /* Setting mdLive.fontSize, set on body by main.ts. */
+  --crepe-base-font-size: var(--mdlive-font-size, 16px);
   --crepe-font-title: var(--vscode-font-family);
   --crepe-font-default: var(--vscode-font-family);
   --crepe-font-code: var(--vscode-editor-font-family);
@@ -77,9 +78,10 @@ body[data-theme='dark'] {
 }
 
 .milkdown .ProseMirror {
-  max-width: 900px;
-  margin: 0 auto;
-  padding: 40px 80px;
+  max-width: 960px;
+  margin: 0;
+  /* Left padding leaves just enough room for Crepe's block handle (+ and drag). */
+  padding: 40px 40px 40px 72px;
 }
 
 .milkdown ::selection {

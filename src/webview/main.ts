@@ -313,6 +313,7 @@ window.addEventListener('message', async (event) => {
     case 'init':
       baseUri = msg.baseUri;
       document.body.dataset.theme = msg.theme;
+      document.body.style.setProperty('--mdlive-font-size', `${msg.fontSize}px`);
       drawingDevice = msg.drawingDevice;
       await createEditor(msg.text);
       break;
@@ -325,6 +326,9 @@ window.addEventListener('message', async (event) => {
       break;
     case 'theme':
       document.body.dataset.theme = msg.theme;
+      break;
+    case 'fontSize':
+      document.body.style.setProperty('--mdlive-font-size', `${msg.fontSize}px`);
       break;
     case 'drawingDevice':
       drawingDevice = msg.device;

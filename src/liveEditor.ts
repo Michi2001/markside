@@ -8,6 +8,10 @@ function getTheme(): string {
   return vscode.workspace.getConfiguration('mdLive').get<string>('theme', 'auto');
 }
 
+function getFontSize(): number {
+  return vscode.workspace.getConfiguration('mdLive').get<number>('fontSize', 16);
+}
+
 type WebviewMessage =
   | { type: 'ready' }
   | { type: 'edit'; text: string }
@@ -73,6 +77,9 @@ export class LiveEditorProvider implements vscode.CustomTextEditorProvider {
       if (e.affectsConfiguration('mdLive.theme')) {
         panel.webview.postMessage({ type: 'theme', theme: getTheme() });
       }
+      if (e.affectsConfiguration('mdLive.fontSize')) {
+        panel.webview.postMessage({ type: 'fontSize', fontSize: getFontSize() });
+      }
       if (e.affectsConfiguration('mdLive.drawingDevice')) {
         panel.webview.postMessage({ type: 'drawingDevice', device: getDrawingDevice() });
       }
@@ -106,6 +113,7 @@ export class LiveEditorProvider implements vscode.CustomTextEditorProvider {
             text: document.getText(),
             baseUri: panel.webview.asWebviewUri(docDir).toString() + '/',
             theme: getTheme(),
+            fontSize: getFontSize(),
             drawingDevice: getDrawingDevice(),
           });
           break;

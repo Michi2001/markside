@@ -25,7 +25,7 @@ npm run package && code --install-extension markdown-live-editor-0.1.0.vsix --fo
 Three bundles (see `esbuild.mjs`):
 
 - **Extension host** (`src/extension.ts`, `src/liveEditor.ts`, `src/assets.ts`, `src/drawingServer.ts`): Node/CJS, `vscode` is external.
-  - `extension.ts`: registers the custom editor `mdLive.editor` and the commands `mdLive.open`, `mdLive.openAsText` (swap the active tab via `vscode.openWith`), `mdLive.sendSelectionToClaude` `mdLive.insertDrawing`, `mdLive.showIpadUrl`, `mdLive.renewIpadUrl` (new token, old URLs stop working), `mdLive.chooseTheme` (writes the `mdLive.theme` setting) and `mdLive.chooseDrawingDevice` (writes `mdLive.drawingDevice`; the editor title shows one variant per device, `mdLive.chooseDrawingDevice.<device>`, picked via `config.mdLive.drawingDevice` so its icon matches; also a status bar item shown while a live editor tab is active, `registerDeviceStatus`).
+  - `extension.ts`: registers the custom editor `mdLive.editor` and the commands `mdLive.open`, `mdLive.openAsText` (swap the active tab via `vscode.openWith`), `mdLive.sendSelectionToClaude` `mdLive.insertDrawing`, `mdLive.showIpadUrl`, `mdLive.renewIpadUrl` (new token, old URLs stop working), `mdLive.chooseTheme` (writes the `mdLive.theme` setting), `mdLive.chooseFontSize` (writes `mdLive.fontSize`, px; drives `--crepe-base-font-size` via `--mdlive-font-size` on `body`) and `mdLive.chooseDrawingDevice` (writes `mdLive.drawingDevice`; the editor title shows one variant per device, `mdLive.chooseDrawingDevice.<device>`, picked via `config.mdLive.drawingDevice` so its icon matches; also a status bar item shown while a live editor tab is active, `registerDeviceStatus`).
   - `liveEditor.ts`: `LiveEditorProvider` (`CustomTextEditorProvider`). The `TextDocument` is the single source of truth; the webview is only a view.
   - `assets.ts`: per-note image folders (saving, cleanup, sync on rename/copy/delete).
   - `drawingServer.ts`: local HTTP server for drawing on an iPad (see Handwriting).
@@ -39,7 +39,8 @@ Three bundles (see `esbuild.mjs`):
 | Direction | Type | Purpose |
 |---|---|---|
 | Webview → Ext | `ready` | Webview loaded, requests `init` |
-| Ext → Webview | `init` | Document text + `baseUri` (note's folder) + `theme` |
+| Ext → Webview | `init` | Document text + `baseUri` (note's folder) + `theme` + `fontSize` |
+| Ext → Webview | `fontSize` | `mdLive.fontSize` changed → `--mdlive-font-size` on `body` |
 | Ext → Webview | `theme` | Color mode changed (`mdLive.theme`: `auto`/`light`/`dark`) → `body[data-theme]` |
 | Webview → Ext | `edit` | Full Markdown after a change |
 | Ext → Webview | `update` | External change to the document (`replaceAll`) |

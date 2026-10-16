@@ -95,6 +95,12 @@
         "title": "Choose Color Mode",
         "category": "Markdown Live",
         "icon": "$(color-mode)"
+      },
+      {
+        "command": "mdLive.chooseFontSize",
+        "title": "Choose Font Size",
+        "category": "Markdown Live",
+        "icon": "$(text-size)"
       }
     ],
     "menus": {
@@ -143,6 +149,11 @@
           "command": "mdLive.chooseTheme",
           "when": "activeCustomEditorId == mdLive.editor",
           "group": "navigation@4"
+        },
+        {
+          "command": "mdLive.chooseFontSize",
+          "when": "activeCustomEditorId == mdLive.editor",
+          "group": "navigation@4"
         }
       ],
       "commandPalette": [
@@ -185,6 +196,10 @@
         {
           "command": "mdLive.chooseTheme",
           "when": "activeCustomEditorId == mdLive.editor"
+        },
+        {
+          "command": "mdLive.chooseFontSize",
+          "when": "activeCustomEditorId == mdLive.editor"
         }
       ]
     },
@@ -205,6 +220,13 @@
             "Always use a dark editor."
           ],
           "description": "Color mode of the Markdown Live Editor."
+        },
+        "mdLive.fontSize": {
+          "type": "number",
+          "default": 16,
+          "minimum": 8,
+          "maximum": 40,
+          "description": "Base font size of notes in the Markdown Live Editor (px); headings and code scale with it."
         },
         "mdLive.drawingDevice": {
           "type": "string",

@@ -35,6 +35,7 @@ export function activate(context: vscode.ExtensionContext): void {
     ),
     vscode.commands.registerCommand('mdLive.insertDrawing', () => provider.postToActivePanel('insertDrawing')),
     vscode.commands.registerCommand('mdLive.chooseTheme', chooseTheme),
+    vscode.commands.registerCommand('mdLive.chooseFontSize', chooseFontSize),
     vscode.commands.registerCommand('mdLive.chooseDrawingDevice', chooseDrawingDevice),
     // One variant per device, so the editor title shows the current device's icon.
     ...DEVICES.map((d) => vscode.commands.registerCommand(`mdLive.chooseDrawingDevice.${d.value}`, chooseDrawingDevice)),
@@ -126,6 +127,20 @@ async function chooseTheme(): Promise<void> {
   const picked = await vscode.window.showQuickPick(items, { placeHolder: 'Color mode of the Markdown Live Editor' });
   if (picked) {
     await vscode.workspace.getConfiguration('mdLive').update('theme', picked.value, vscode.ConfigurationTarget.Global);
+  }
+}
+
+async function chooseFontSize(): Promise<void> {
+  const config = vscode.workspace.getConfiguration('mdLive');
+  const current = config.get<number>('fontSize', 16);
+  const items = [8, 9, 10, 11, 12, 13, 14, 15, 16, 17, 18, 20, 22, 24].map((size) => ({
+    label: `${size} px`,
+    description: [size === 16 ? 'default' : '', size === current ? 'current' : ''].filter(Boolean).join(', '),
+    value: size,
+  }));
+  const picked = await vscode.window.showQuickPick(items, { placeHolder: `Font size of notes (current: ${current} px)` });
+  if (picked) {
+    await config.update('fontSize', picked.value, vscode.ConfigurationTarget.Global);
   }
 }
 
