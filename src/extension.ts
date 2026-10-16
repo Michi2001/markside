@@ -1,7 +1,7 @@
 import * as crypto from 'crypto';
 import * as vscode from 'vscode';
 import { registerAssetSync } from './assets';
-import { DrawingServer, getDrawingDevice } from './drawingServer';
+import { DrawingServer, getDrawingDevice, usbAddresses } from './drawingServer';
 import { LiveEditorProvider, saveToNote } from './liveEditor';
 
 export function activate(context: vscode.ExtensionContext): void {
@@ -36,8 +36,16 @@ export function activate(context: vscode.ExtensionContext): void {
     vscode.commands.registerCommand('mdLive.insertDrawing', () => provider.postToActivePanel('insertDrawing')),
     vscode.commands.registerCommand('mdLive.chooseTheme', chooseTheme),
     vscode.commands.registerCommand('mdLive.chooseDrawingDevice', chooseDrawingDevice),
+    // One variant per device, so the editor title shows the current device's icon.
+    ...DEVICES.map((d) => vscode.commands.registerCommand(`mdLive.chooseDrawingDevice.${d.value}`, chooseDrawingDevice)),
     ...registerDeviceStatus(),
     vscode.commands.registerCommand('mdLive.showIpadUrl', () => showIpadUrl(drawingServer)),
+    vscode.commands.registerCommand('mdLive.renewIpadUrl', async () => {
+      const token = crypto.randomBytes(16).toString('hex');
+      await context.globalState.update('ipadToken', token);
+      drawingServer.setToken(token);
+      await showIpadUrl(drawingServer);
+    }),
     vscode.workspace.onDidChangeConfiguration((e) => {
       // Restarted on the next request (sidecar listens on another interface).
       if (e.affectsConfiguration('mdLive.drawingDevice') || e.affectsConfiguration('mdLive.ipadPort')) {
@@ -50,11 +58,14 @@ export function activate(context: vscode.ExtensionContext): void {
 }
 
 async function showIpadUrl(server: DrawingServer): Promise<void> {
-  if (getDrawingDevice() !== 'ipad') {
+  if (!['ipad', 'ipadUsb'].includes(getDrawingDevice())) {
     await vscode.workspace.getConfiguration('mdLive').update('drawingDevice', 'ipad', vscode.ConfigurationTarget.Global);
   }
   // Runs for a while, so the page can be opened and bookmarked on the iPad.
   server.start();
+  if (getDrawingDevice() === 'ipadUsb' && usbAddresses().length === 0) {
+    vscode.window.showWarningMessage('No USB connection to the iPad found – connect it with a cable (the server follows once it is there).');
+  }
   const url = await vscode.window.showQuickPick(server.urls(), {
     placeHolder: 'Copy the address for the iPad (the .local name keeps working when the IP changes)',
   });
@@ -69,6 +80,7 @@ export function deactivate(): void {}
 const DEVICES = [
   { label: '$(device-desktop) Mac', description: 'Draw in the editor window', value: 'mac' },
   { label: '$(device-mobile) iPad', description: 'Safari on the iPad (same network)', value: 'ipad' },
+  { label: '$(plug) iPad (USB)', description: 'Safari on the iPad, only via USB cable (public networks)', value: 'ipadUsb' },
   { label: '$(screen-full) Sidecar', description: 'Full screen window on the Sidecar display', value: 'sidecar' },
 ];
 
@@ -93,7 +105,7 @@ function registerDeviceStatus(): vscode.Disposable[] {
       return;
     }
     const device = DEVICES.find((d) => d.value === getDrawingDevice()) ?? DEVICES[0];
-    item.text = `$(edit) ${device.label.replace(/^\$\([^)]*\) /, '')}`;
+    item.text = device.label;
     item.show();
   };
   update();

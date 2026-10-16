@@ -1,4 +1,4 @@
-import { execFile, spawn } from 'child_process';
+import { execFile, execFileSync, spawn } from 'child_process';
 import * as fs from 'fs';
 import * as http from 'http';
 import * as os from 'os';
@@ -14,12 +14,16 @@ const FILES: Record<string, string> = {
 };
 // Keeps idle event streams from being dropped by Safari or the network.
 const KEEPALIVE_MS = 25000;
+// USB: how often to check whether the cable's address changed (replugged).
+const ADDRESS_CHECK_MS = 3000;
 // The server only runs on demand: it stops this long after the last drawing request.
 const IDLE_MS = 2 * 60 * 1000;
 // Sidecar: time for an open browser window to reconnect before a new one is opened.
 const RECONNECT_GRACE_MS = 5000;
 // Sidecar mode listens on the loopback interface only, so no other device can reach the server.
 const LOOPBACK = '127.0.0.1';
+// Images the asset route may serve (never any other file on the Mac).
+const IMAGE = /\.(png|jpe?g|gif|webp|bmp|svg)$/i;
 const CHROME = '/Applications/Google Chrome.app';
 // Frame of the Sidecar display in top-left based global coordinates (as Chrome expects), or ''.
 const FIND_SIDECAR = `ObjC.import('AppKit');
@@ -84,9 +88,46 @@ function getPort(): number {
   return vscode.workspace.getConfiguration('mdLive').get<number>('ipadPort', 8765);
 }
 
+// Drawing device 'ipadUsb': the iPad may only connect via the USB cable.
+function usbOnly(): boolean {
+  return getDrawingDevice() === 'ipadUsb';
+}
+
+function isLinkLocal(address: string): boolean {
+  return address.startsWith('169.254.') || /^fe[89ab]/i.test(address);
+}
+
+// Addresses of the USB cable link to the iPad: interfaces with a self-assigned IPv4 address
+// (169.254.x.x) and no other. Wi-Fi also has an fe80:: address but a real IPv4 one too; AirDrop's
+// peer-to-peer Wi-Fi (awdl0, llw0) and VPN tunnels (utun) have only fe80::, so all are excluded.
+export function usbAddresses(): string[] {
+  return Object.values(os.networkInterfaces())
+    .filter((addrs) => addrs && addrs.every((a) => isLinkLocal(a.address)) && addrs.some((a) => a.address.startsWith('169.254.')))
+    .flatMap((addrs) => addrs!.map((a) => a.address));
+}
+
+// Sidecar: only the Mac itself. USB: only the cable's IPv4 address, so a connection attempt via
+// Wi-Fi (the .local name may resolve to it) is refused right away and Safari tries the next address.
+// Without a cable, loopback (unreachable from the iPad). Otherwise all interfaces.
+function listenHost(): string | undefined {
+  if (usbOnly()) {
+    return usbAddresses().find((a) => a.startsWith('169.254.')) ?? LOOPBACK;
+  }
+  return getDrawingDevice() === 'sidecar' ? LOOPBACK : undefined;
+}
+
+// Targets sent by a client must point to an existing Markdown note in the workspace.
+function noteUri(note: string): vscode.Uri | undefined {
+  const uri = vscode.Uri.parse(note);
+  const ok = uri.scheme === 'file' && /\.md$/i.test(uri.path) && vscode.workspace.getWorkspaceFolder(uri) && fs.existsSync(uri.fsPath);
+  return ok ? uri : undefined;
+}
+
 export class DrawingServer implements vscode.Disposable {
   private server: http.Server | undefined;
+  private host: string | undefined;
   private keepalive: NodeJS.Timeout | undefined;
+  private addressCheck: NodeJS.Timeout | undefined;
   private idle: NodeJS.Timeout | undefined;
   private readonly clients = new Set<http.ServerResponse>();
   private pending: Pending | undefined;
@@ -95,7 +136,7 @@ export class DrawingServer implements vscode.Disposable {
 
   constructor(
     private readonly distUri: vscode.Uri,
-    private readonly token: string,
+    private token: string,
     // Profile of the separate Chrome instance for the Sidecar window.
     private readonly browserDir: string,
     // Saves a result nobody waits for anymore into its note.
@@ -109,14 +150,25 @@ export class DrawingServer implements vscode.Disposable {
     if (this.server) {
       return;
     }
+    this.listen();
+    this.keepalive = setInterval(() => this.clients.forEach((c) => c.write(': keepalive\n\n')), KEEPALIVE_MS);
+    // Follows a new cable address without dropping the pending request.
+    this.addressCheck = setInterval(() => listenHost() !== this.host && this.listen(), ADDRESS_CHECK_MS);
+  }
+
+  // (Re)creates the HTTP server on the current listen address.
+  private listen(): void {
+    this.clients.forEach((c) => c.end());
+    this.clients.clear();
+    this.server?.close();
+    this.host = listenHost();
     const server = http.createServer((req, res) => this.handle(req, res));
     server.on('error', (err) => {
       vscode.window.showWarningMessage(`iPad drawing server: ${err.message}`);
       this.stop();
     });
-    server.listen(getPort(), getDrawingDevice() === 'sidecar' ? LOOPBACK : undefined);
+    server.listen(getPort(), this.host);
     this.server = server;
-    this.keepalive = setInterval(() => this.clients.forEach((c) => c.write(': keepalive\n\n')), KEEPALIVE_MS);
   }
 
   stop(): void {
@@ -126,6 +178,7 @@ export class DrawingServer implements vscode.Disposable {
     this.pending?.resolve(null);
     this.pending = undefined;
     clearInterval(this.keepalive);
+    clearInterval(this.addressCheck);
     this.clients.forEach((c) => c.end());
     this.clients.clear();
     this.server?.close();
@@ -136,15 +189,22 @@ export class DrawingServer implements vscode.Disposable {
     this.stop();
   }
 
-  // Bonjour name first (stays valid when the IP changes), then the IPv4 addresses.
+  // Old addresses stop working; pages opened with them get 404.
+  setToken(token: string): void {
+    this.stop();
+    this.token = token;
+  }
+
+  // Bonjour name first (stays valid when the IP changes), then the IPv4 addresses (USB: the cable's).
   urls(): string[] {
     if (getDrawingDevice() === 'sidecar') {
       return [`http://${LOOPBACK}:${getPort()}/${this.token}/`];
     }
-    const name = os.hostname().replace(/\.local$/, '') + '.local';
+    // The Bonjour name (LocalHostName) can differ from os.hostname(), which may not resolve.
+    const name = execFileSync('scutil', ['--get', 'LocalHostName'], { encoding: 'utf8' }).trim() + '.local';
     const ips = Object.values(os.networkInterfaces())
       .flat()
-      .filter((a) => a && a.family === 'IPv4' && !a.internal)
+      .filter((a) => a && a.family === 'IPv4' && !a.internal && (!usbOnly() || usbAddresses().includes(a.address)))
       .map((a) => a!.address);
     return [name, ...ips].map((host) => `http://${host}:${getPort()}/${this.token}/`);
   }
@@ -285,15 +345,19 @@ export class DrawingServer implements vscode.Disposable {
         // Closes the canvas on other open iPad pages.
         this.broadcast('cancel', { id });
         pending.resolve(file);
-      } else if (file) {
+      } else if (file && noteUri(target.note) && file.mime.startsWith('image/')) {
         this.handled.add(id);
         await this.saveToNote(file, target);
       }
     } else if (route === 'asset') {
       // The original image of a drawing the iPad reopens from its draft (the draft keeps no image data).
+      // Only an image the note links to and that lies in its workspace folder.
       const params = new URL(req.url ?? '/', 'http://localhost').searchParams;
-      const uri = vscode.Uri.joinPath(vscode.Uri.parse(params.get('note')!), '..', decodeURIComponent(params.get('src')!));
-      if (fs.existsSync(uri.fsPath)) {
+      const note = noteUri(params.get('note') ?? '');
+      const src = params.get('src') ?? '';
+      const linked = note && IMAGE.test(src) && (await vscode.workspace.openTextDocument(note)).getText().includes(src);
+      const uri = note && vscode.Uri.joinPath(note, '..', decodeURIComponent(src));
+      if (linked && uri && vscode.workspace.getWorkspaceFolder(uri) && fs.existsSync(uri.fsPath)) {
         res.writeHead(200).end(await vscode.workspace.fs.readFile(uri));
       } else {
         res.writeHead(404).end();

@@ -26,7 +26,7 @@ let uploadCounter = 0;
 const pendingUploads = new Map<number, (path: string) => void>();
 const pendingDrawings = new Map<number, (path: string | null) => void>();
 // Setting mdLive.drawingDevice: draw in this webview ('mac') or on the drawing page served by the
-// extension, opened on the iPad ('ipad') or in a browser window on the Mac ('sidecar').
+// extension, opened on the iPad ('ipad', 'ipadUsb') or in a browser window on the Mac ('sidecar').
 let drawingDevice = 'mac';
 
 // Relative image paths in the note are resolved against the note's folder (as a webview URI).

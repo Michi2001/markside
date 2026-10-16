@@ -56,10 +56,39 @@
         "category": "Markdown Live"
       },
       {
+        "command": "mdLive.renewIpadUrl",
+        "title": "Draw on iPad: New Address (invalidate the old one)",
+        "category": "Markdown Live"
+      },
+      {
         "command": "mdLive.chooseDrawingDevice",
         "title": "Choose Drawing Device",
         "category": "Markdown Live",
         "icon": "$(device-mobile)"
+      },
+      {
+        "command": "mdLive.chooseDrawingDevice.mac",
+        "title": "Choose Drawing Device",
+        "category": "Markdown Live",
+        "icon": "$(device-desktop)"
+      },
+      {
+        "command": "mdLive.chooseDrawingDevice.ipad",
+        "title": "Choose Drawing Device",
+        "category": "Markdown Live",
+        "icon": "$(device-mobile)"
+      },
+      {
+        "command": "mdLive.chooseDrawingDevice.ipadUsb",
+        "title": "Choose Drawing Device",
+        "category": "Markdown Live",
+        "icon": "$(plug)"
+      },
+      {
+        "command": "mdLive.chooseDrawingDevice.sidecar",
+        "title": "Choose Drawing Device",
+        "category": "Markdown Live",
+        "icon": "$(screen-full)"
       },
       {
         "command": "mdLive.chooseTheme",
@@ -91,8 +120,23 @@
           "group": "navigation@3"
         },
         {
-          "command": "mdLive.chooseDrawingDevice",
-          "when": "activeCustomEditorId == mdLive.editor",
+          "command": "mdLive.chooseDrawingDevice.mac",
+          "when": "activeCustomEditorId == mdLive.editor && config.mdLive.drawingDevice == mac",
+          "group": "navigation@3"
+        },
+        {
+          "command": "mdLive.chooseDrawingDevice.ipad",
+          "when": "activeCustomEditorId == mdLive.editor && config.mdLive.drawingDevice == ipad",
+          "group": "navigation@3"
+        },
+        {
+          "command": "mdLive.chooseDrawingDevice.ipadUsb",
+          "when": "activeCustomEditorId == mdLive.editor && config.mdLive.drawingDevice == ipadUsb",
+          "group": "navigation@3"
+        },
+        {
+          "command": "mdLive.chooseDrawingDevice.sidecar",
+          "when": "activeCustomEditorId == mdLive.editor && config.mdLive.drawingDevice == sidecar",
           "group": "navigation@3"
         },
         {
@@ -123,6 +167,22 @@
           "when": "activeCustomEditorId == mdLive.editor"
         },
         {
+          "command": "mdLive.chooseDrawingDevice.mac",
+          "when": "false"
+        },
+        {
+          "command": "mdLive.chooseDrawingDevice.ipad",
+          "when": "false"
+        },
+        {
+          "command": "mdLive.chooseDrawingDevice.ipadUsb",
+          "when": "false"
+        },
+        {
+          "command": "mdLive.chooseDrawingDevice.sidecar",
+          "when": "false"
+        },
+        {
           "command": "mdLive.chooseTheme",
           "when": "activeCustomEditorId == mdLive.editor"
         }
@@ -151,12 +211,14 @@
           "enum": [
             "mac",
             "ipad",
+            "ipadUsb",
             "sidecar"
           ],
           "default": "mac",
           "enumDescriptions": [
             "Draw in the editor window.",
             "Draw on an iPad: open the address from 'Draw on iPad: Show Address' in Safari there (same network).",
+            "Like iPad, but the server only accepts connections over the USB cable to the iPad (recommended in public networks such as eduroam). Use the 169.254.x.x address from 'Draw on iPad: Show Address'.",
             "Draw in a browser window on the Sidecar display (opened full screen in its own Chrome window if Chrome is installed); the server is only reachable from the Mac itself."
           ],
           "description": "Where the handwriting canvas (Alt+D, double-click on a drawing) opens."
