@@ -71,16 +71,19 @@ export async function saveImage(note: vscode.Uri, name: string, mime: string, da
   return assetsRef(note) + fileName;
 }
 
-export async function loadFolds(note: vscode.Uri): Promise<Fold[]> {
+// Collapsed headings: a list for a note, a list per card (keyed by section) for PDF notes.
+type Folds = Fold[] | Record<string, Fold[]>;
+
+export async function loadFolds<T extends Folds>(note: vscode.Uri, empty: T): Promise<T> {
   const file = vscode.Uri.joinPath(assetsDir(note), FOLDS_FILE);
-  return (await exists(file)) ? JSON.parse(await readText(file)) : [];
+  return (await exists(file)) ? JSON.parse(await readText(file)) : empty;
 }
 
 // Writes the collapsed headings; with none left the file (and an otherwise empty folder) goes away.
-export async function saveFolds(note: vscode.Uri, folds: Fold[]): Promise<void> {
+export async function saveFolds(note: vscode.Uri, folds: Folds): Promise<void> {
   const dir = assetsDir(note);
   const file = vscode.Uri.joinPath(dir, FOLDS_FILE);
-  if (folds.length > 0) {
+  if (Object.keys(folds).length > 0) {
     await fs.createDirectory(dir);
     await fs.writeFile(file, Buffer.from(JSON.stringify(folds)));
     return;
@@ -191,7 +194,12 @@ export function registerAssetSync(): vscode.Disposable {
       }
     }),
     vscode.workspace.onDidDeleteFiles(async (e) => {
-      for (const uri of e.files.filter(isNote)) {
+      // A deleted PDF takes its notes file (and thus its assets folder) along.
+      const notes = await Promise.all(e.files.filter(isPdf).map(async (pdf) => ((await exists(notesUri(pdf))) ? [notesUri(pdf)] : [])));
+      for (const uri of notes.flat()) {
+        await fs.delete(uri, { useTrash: true });
+      }
+      for (const uri of [...e.files.filter(isNote), ...notes.flat()]) {
         if (await exists(assetsDir(uri))) {
           await fs.delete(assetsDir(uri), { recursive: true, useTrash: true });
         }

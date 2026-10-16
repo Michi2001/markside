@@ -135,7 +135,7 @@ export class LiveEditorProvider implements vscode.CustomTextEditorProvider {
             fontSize: this.fontSizes.get(document.uri),
             title: noteTitle(document.uri),
             drawingDevice: getDrawingDevice(),
-            folds: await loadFolds(document.uri),
+            folds: await loadFolds(document.uri, []),
           });
           break;
         case 'folds':

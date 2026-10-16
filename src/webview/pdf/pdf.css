@@ -153,6 +153,8 @@ body.alt .page .textLayer span {
 .mark[data-color='red'] { background: var(--mark-red); }
 .mark[data-color='green'] { background: var(--mark-green); }
 .mark[data-color='blue'] { background: var(--mark-blue); }
+/* Random colors (Alt+A) set --mark-custom/--line-custom inline. */
+.mark[data-color^='h'] { background: var(--mark-custom); }
 
 .mark.area {
   background: none;
@@ -164,6 +166,7 @@ body.alt .page .textLayer span {
 .mark.area[data-color='red'] { outline-color: var(--line-red); }
 .mark.area[data-color='green'] { outline-color: var(--line-green); }
 .mark.area[data-color='blue'] { outline-color: var(--line-blue); }
+.mark.area[data-color^='h'] { outline-color: var(--line-custom); }
 
 .mark.hover {
   filter: saturate(2.2);
@@ -203,6 +206,7 @@ body.alt .page .textLayer span {
 .lines path[data-color='red'] { stroke: var(--line-red); }
 .lines path[data-color='green'] { stroke: var(--line-green); }
 .lines path[data-color='blue'] { stroke: var(--line-blue); }
+.lines path[data-color^='h'] { stroke: var(--line-custom); }
 
 .lines path.hover,
 .lines path.focus {
@@ -228,6 +232,7 @@ body.alt .page .textLayer span {
 .card[data-color='red'] { --card-color: var(--line-red); }
 .card[data-color='green'] { --card-color: var(--line-green); }
 .card[data-color='blue'] { --card-color: var(--line-blue); }
+.card[data-color^='h'] { --card-color: var(--line-custom); }
 
 .card.page-note {
   --card-color: var(--vscode-descriptionForeground);

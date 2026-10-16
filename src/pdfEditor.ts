@@ -1,21 +1,30 @@
 import * as vscode from 'vscode';
-import { adoptAssets, cleanupAssets, notesUri, saveImage } from './assets';
+import { adoptAssets, cleanupAssets, loadFolds, notesUri, saveFolds, saveImage } from './assets';
 import { DrawingServer, getDrawingDevice } from './drawingServer';
 import type { FontSizes } from './fontSizes';
 import { applyMinimalEdit, getTheme, sendSelectionToClaude } from './liveEditor';
 import { preserveSource } from './preserve';
-import { type Anchor, addNote, deleteNote, parseSections, setNoteBody } from './sidecar';
+import { type Anchor, type Section, addNote, deleteNote, formatAnchor, parseSections, setNoteBody } from './sidecar';
+import type { Fold } from './webview/fold';
 
 type WebviewMessage =
   | { type: 'ready' }
   | { type: 'editNote'; key: string; text: string }
-  | { type: 'addNote'; anchor: Anchor; label: string; body: string }
-  | { type: 'deleteNote'; key: string }
+  | { type: 'addNote'; anchor: Anchor; label: string; body: string; replace: string[] }
+  | { type: 'deleteNote'; key: string; discard: boolean }
+  | { type: 'undo'; redo: boolean }
+  | { type: 'folds'; folds: Record<string, Fold[]> }
   | { type: 'saveImage'; id: number; name: string; mime: string; data: string }
   | { type: 'selection'; text: string }
   | { type: 'drawRemote'; id: number; drawing: unknown; src: string | null };
 
 const SAVE_DELAY_MS = 800;
+
+type NoteData = { anchor: Anchor; label: string; body: string };
+// One undoable step: notes added and removed together (a new mark replacing others, a deletion).
+type Step = { added: NoteData[]; removed: NoteData[] };
+
+const noteData = (s: Section): NoteData => ({ anchor: s.anchor!, label: s.label, body: s.body });
 
 // Read-only PDF view with the notes of `paper.pdf.md` next to the pages. Like the Markdown editor,
 // the notes' TextDocument is the single source of truth; it is saved automatically, since the PDF
@@ -55,6 +64,9 @@ export class PdfEditorProvider implements vscode.CustomReadonlyEditorProvider {
     // Per note: the body as stored (source formatting kept) and as the webview sent it, so resending
     // the notes doesn't overwrite a card with its own, differently formatted content.
     const echo = new Map<string, { stored: string; webview: string }>();
+    // Adding and deleting marks/notes; text inside a card has the card editor's own undo.
+    const undoStack: Step[] = [];
+    const redoStack: Step[] = [];
 
     const queue = (task: () => Promise<unknown>): void => {
       editQueue = editQueue.then(task);
@@ -154,6 +166,7 @@ export class PdfEditorProvider implements vscode.CustomReadonlyEditorProvider {
             notesWidth: getNotesWidth(),
             drawingDevice: getDrawingDevice(),
             sections: sections(),
+            folds: await loadFolds(notes, {}),
           });
           break;
         case 'editNote':
@@ -169,16 +182,61 @@ export class PdfEditorProvider implements vscode.CustomReadonlyEditorProvider {
           break;
         case 'addNote':
           queue(async () => {
-            await write((text) => addNote(text, msg.anchor, msg.label, msg.body));
+            // Marks the new one was drawn over are replaced by it.
+            await write((text) => {
+              const removed = parseSections(text).filter((s) => msg.replace.includes(s.key));
+              undoStack.push({ added: [{ anchor: msg.anchor, label: msg.label, body: msg.body }], removed: removed.map(noteData) });
+              redoStack.length = 0;
+              return addNote(msg.replace.reduce(deleteNote, text), msg.anchor, msg.label, msg.body);
+            });
+            msg.replace.forEach((key) => echo.delete(key));
             sendNotes();
           });
           break;
         case 'deleteNote':
           queue(async () => {
-            await write((text) => deleteNote(text, msg.key));
+            await write((text) => {
+              const section = parseSections(text).find((s) => s.key === msg.key);
+              const last = undoStack[undoStack.length - 1];
+              // A mark created for a note that stayed empty: as if it was never added.
+              if (msg.discard && last?.added.length === 1 && formatAnchor(last.added[0].anchor) === msg.key) {
+                undoStack.pop();
+              } else if (section?.anchor) {
+                undoStack.push({ added: [], removed: [noteData(section)] });
+                redoStack.length = 0;
+              }
+              return deleteNote(text, msg.key);
+            });
             echo.delete(msg.key);
             sendNotes();
           });
+          break;
+        case 'undo':
+          queue(async () => {
+            const step = (msg.redo ? redoStack : undoStack).pop();
+            if (!step) {
+              return;
+            }
+            const [remove, add] = msg.redo ? [step.removed, step.added] : [step.added, step.removed];
+            await write((text) => {
+              // Notes edited since keep their current text when they are removed (and come back with it).
+              const sections = parseSections(text);
+              for (const n of remove) {
+                const current = sections.find((s) => s.key === formatAnchor(n.anchor));
+                if (current) {
+                  n.body = current.body;
+                }
+              }
+              const rest = remove.map((n) => formatAnchor(n.anchor)).reduce(deleteNote, text);
+              return add.reduce((t, n) => addNote(t, n.anchor, n.label, n.body), rest);
+            });
+            [...remove, ...add].forEach((n) => echo.delete(formatAnchor(n.anchor)));
+            (msg.redo ? undoStack : redoStack).push(step);
+            sendNotes();
+          });
+          break;
+        case 'folds':
+          queue(() => saveFolds(notes, msg.folds));
           break;
         case 'saveImage': {
           const relPath = await saveImage(notes, msg.name, msg.mime, msg.data);

@@ -3,6 +3,7 @@ import * as pdfjs from 'pdfjs-dist';
 import type { PDFPageProxy, RenderTask } from 'pdfjs-dist';
 import { type Anchor, type Rect, type Section, formatAnchor, pageKey } from '../../sidecar';
 import { isDrawingOpen } from '../drawing';
+import { type Fold, foldPlugin, getFolds, setFolds, toggleFold } from '../fold';
 import { applyInit, handleHostMessage, post, saveFile } from '../host';
 import { HIGHLIGHT_KEYS, type NoteEditor, createNoteEditor, getActiveEditor, installShortcuts, setActiveEditor } from '../noteEditor';
 import './pdf.css';
@@ -26,6 +27,8 @@ const MAX_SCALE = 2;
 const SNAPSHOT_SCALE = 2.5;
 const RENDER_DELAY_MS = 200;
 const COLORS = ['yellow', 'red', 'green', 'blue'];
+// Hues of red and green; random colors (Alt+A, stored as `h<hue>`) keep away from them.
+const AVOID_HUES = [345, 135];
 
 type Card = {
   key: string;
@@ -34,9 +37,21 @@ type Card = {
   body: HTMLElement;
   editor?: NoteEditor;
   creating?: Promise<NoteEditor>;
-  // Body last exchanged with the extension.
+  // Body (without the area snapshot) last exchanged with the extension.
   source: string;
 };
+
+// The snapshot image at the start of an area note stays in the file (for Claude) but is not shown in
+// its card; `text` is what the card edits.
+const SNAPSHOT_ALT = 'PDF area';
+const SNAPSHOT = /^!\[(?:PDF area)?\]\([^)\s]+\)[ \t]*(?:\r?\n|$)/;
+
+function splitBody(section: Section): { snapshot: string; text: string } {
+  const match = section.anchor?.area ? SNAPSHOT.exec(section.body) : null;
+  return match
+    ? { snapshot: match[0].trim(), text: section.body.slice(match[0].length).replace(/^\s*\n/, '') }
+    : { snapshot: '', text: section.body };
+}
 
 type PageView = {
   num: number;
@@ -64,6 +79,12 @@ let distUri = '';
 let latestSections: Section[] = [];
 // Card to focus once the extension has added its note.
 let pendingFocus: string | undefined;
+// Collapsed list items/headings per card (`foo.pdf.assets/.folds.json`).
+let folds: Record<string, Fold[]> = {};
+// Mark under the pointer (Delete/Backspace removes it).
+let hoveredMark: string | undefined;
+// Notes just created with their card open: left empty, the mark goes too.
+const freshNotes = new Set<string>();
 // Pages near the viewport (rendered); others drop their canvas.
 const nearPages = new Set<PageView>();
 // Rows far from the viewport whose cards are laid out once they come near (zooming stays cheap).
@@ -236,14 +257,14 @@ function createCard(section: Section): Card {
   del.title = 'Delete note';
   del.textContent = '×';
   const body = el('div', 'card-body', cardEl);
-  const card: Card = { key: section.key, section, el: cardEl, body, source: section.body };
+  const card: Card = { key: section.key, section, el: cardEl, body, source: splitBody(section).text };
   updateCard(card, section);
-  body.textContent = section.body;
+  body.textContent = card.source;
   pv.margin.append(cardEl);
 
   del.addEventListener('mousedown', (e) => {
     e.preventDefault();
-    removeNote(card);
+    removeNote(card.key);
   });
   head.addEventListener('mousedown', (e) => {
     e.preventDefault();
@@ -254,14 +275,22 @@ function createCard(section: Section): Card {
       focusCard(card, true);
     }
   });
-  // A mark whose note stays empty is kept as a plain highlight; its card goes once the focus leaves it
-  // (not while drawing into it).
+  // A mark whose note stays empty is kept as a plain highlight (removed if it was only just created
+  // for this note); its card goes once the focus leaves it (not while drawing into it).
   cardEl.addEventListener('focusout', () => {
     setTimeout(() => {
       const left = !cardEl.contains(document.activeElement) && !isDrawingOpen();
-      if (cards.get(card.key) === card && left && card.section.anchor && isEmpty(card)) {
-        dropCard(card);
-        layoutRow(pv);
+      if (cards.get(card.key) !== card || !left) {
+        return;
+      }
+      const fresh = freshNotes.delete(card.key);
+      if (card.section.anchor && isEmpty(card)) {
+        if (fresh) {
+          removeNote(card.key, true);
+        } else {
+          dropCard(card);
+          layoutRow(pv);
+        }
       }
     }, 200);
   });
@@ -278,11 +307,22 @@ function updateCard(card: Card, section: Section): void {
   const { anchor } = section;
   card.el.dataset.key = section.key;
   card.el.dataset.color = anchor?.color ?? '';
+  setCustomColor(card.el, anchor?.color);
   card.el.classList.toggle('page-note', !anchor);
   card.el.classList.toggle('empty', !card.source.trim());
   const label = card.el.querySelector('.card-label') as HTMLElement;
   label.textContent = anchor ? (anchor.area ? section.label || 'Area' : `„${section.label}“`) : `Page ${section.page}`;
   label.title = label.textContent;
+}
+
+// Folds of cards whose note is gone are dropped.
+function saveCardFolds(key: string, list: Fold[]): void {
+  const exists = (k: string) => k.startsWith('page:') || latestSections.some((s) => s.key === k);
+  const next = Object.fromEntries(Object.entries({ ...folds, [key]: list }).filter(([k, l]) => l.length > 0 && exists(k)));
+  if (JSON.stringify(next) !== JSON.stringify(folds)) {
+    folds = next;
+    post({ type: 'folds', folds });
+  }
 }
 
 function ensureEditor(card: Card): Promise<NoteEditor> {
@@ -294,12 +334,15 @@ function ensureEditor(card: Card): Promise<NoteEditor> {
       (markdown) => {
         card.source = markdown;
         card.el.classList.toggle('empty', !markdown.trim());
-        post({ type: 'editNote', key: card.key, text: markdown });
+        const { snapshot } = splitBody(card.section);
+        const text = snapshot && markdown.trim() ? `${snapshot}\n\n${markdown}` : snapshot || markdown;
+        post({ type: 'editNote', key: card.key, text });
       },
-      undefined,
+      (crepe) => crepe.editor.use(foldPlugin((f) => saveCardFolds(card.key, f))),
       card.section.anchor ? undefined : 'Note on this page…',
     );
     card.editor = editor;
+    setFolds(editor.view(), folds[card.key] ?? []);
     return editor;
   })();
   return card.creating;
@@ -345,13 +388,20 @@ function dropCard(card: Card): void {
   card.el.remove();
 }
 
-// Removes a text or area note (mark and note) from the file.
-function removeNote(card: Card): void {
-  dropCard(card);
-  latestSections = latestSections.filter((s) => s.key !== card.key);
-  post({ type: 'deleteNote', key: card.key });
+// Removes a text or area note (mark and note) from the file; `discard`: a mark only just created
+// for a note that stayed empty, which is not kept as an undo step.
+function removeNote(key: string, discard = false): void {
+  const section = latestSections.find((s) => s.key === key);
+  const card = cards.get(key);
+  if (card) {
+    dropCard(card);
+  }
+  latestSections = latestSections.filter((s) => s.key !== key);
+  post({ type: 'deleteNote', key, discard });
   renderMarks();
-  layoutRow(pageView(card.section.page)!);
+  if (section) {
+    layoutRow(pageView(section.page)!);
+  }
 }
 
 // Opens the card of a note (created on demand for a plain highlight).
@@ -375,7 +425,7 @@ function applySections(sections: Section[]): void {
   const byKey = new Map(sections.map((s) => [s.key, s]));
   const shown = [
     ...pages.map((pv) => byKey.get(pageKey(pv.num)) ?? emptyPageSection(pv.num)),
-    ...sections.filter((s) => s.anchor && pageView(s.page) && (s.body || cards.get(s.key)?.el.contains(document.activeElement))),
+    ...sections.filter((s) => s.anchor && pageView(s.page) && (splitBody(s).text || cards.get(s.key)?.el.contains(document.activeElement))),
   ];
   const keys = new Set(shown.map((s) => s.key));
   for (const card of [...cards.values()]) {
@@ -385,12 +435,17 @@ function applySections(sections: Section[]): void {
   }
   for (const section of shown) {
     const card = cards.get(section.key) ?? createCard(section);
-    if (section.body !== card.source) {
-      card.source = section.body;
+    const { text } = splitBody(section);
+    if (text !== card.source) {
+      card.source = text;
       if (card.editor) {
-        card.editor.setMarkdown(section.body);
+        // replaceAll drops the collapsed items, they are restored by text.
+        const view = card.editor.view();
+        const kept = getFolds(view.state);
+        card.editor.setMarkdown(text);
+        setFolds(view, kept);
       } else if (!card.creating) {
-        card.body.textContent = section.body;
+        card.body.textContent = text;
       }
     }
     updateCard(card, section);
@@ -419,9 +474,37 @@ function renderMarks(): void {
       const mark = el('div', anchor.area ? 'mark area' : 'mark', pageView(anchor.page)!.marks);
       mark.dataset.key = section.key;
       mark.dataset.color = anchor.color;
+      setCustomColor(mark, anchor.color);
       Object.assign(mark.style, { left: `${r.x * 100}%`, top: `${r.y * 100}%`, width: `${r.w * 100}%`, height: `${r.h * 100}%` });
     }
   }
+}
+
+// Random colors `h<hue>` get their CSS colors inline.
+function setCustomColor(node: HTMLElement | SVGElement, color: string | undefined): void {
+  const hue = /^h(\d+)$/.exec(color ?? '')?.[1];
+  if (hue) {
+    node.style.setProperty('--mark-custom', `hsla(${hue}, 85%, 55%, 0.32)`);
+    node.style.setProperty('--line-custom', `hsl(${hue}, 70%, 48%)`);
+  } else {
+    node.style.removeProperty('--mark-custom');
+    node.style.removeProperty('--line-custom');
+  }
+}
+
+// A random hue far from red and green and from the random colors already on the page.
+function randomColor(page: number): string {
+  const used = latestSections.filter((s) => s.anchor?.page === page).map((s) => Number(/^h(\d+)$/.exec(s.anchor!.color)?.[1]));
+  const avoid = [...AVOID_HUES, ...used.filter(Number.isFinite)];
+  const distance = (h: number) => Math.min(...avoid.map((a) => Math.min(Math.abs(h - a), 360 - Math.abs(h - a))));
+  let best = 0;
+  for (let i = 0; i < 20; i++) {
+    const hue = Math.floor(Math.random() * 360);
+    if (distance(hue) > distance(best)) {
+      best = hue;
+    }
+  }
+  return `h${best}`;
 }
 
 function setHover(key: string | undefined): void {
@@ -518,6 +601,7 @@ function drawLines(pv: PageView, placed: { card: Card; top: number }[]): void {
     path.setAttribute('d', `M${edge},${sy} C${edge + GAP / 2},${sy} ${x1 - GAP / 2},${ey} ${x1},${ey}`);
     path.dataset.key = card.key;
     path.dataset.color = anchor.color;
+    setCustomColor(path, anchor.color);
     path.classList.toggle('focus', card.el.contains(document.activeElement));
     pv.lines.append(path);
   }
@@ -570,12 +654,25 @@ function selectionRects(range: Range, pv: PageView): Rect[] {
   }));
 }
 
-// `edit`: open the new note's card; otherwise the mark is a plain highlight.
-function addNote(anchor: Anchor, label: string, body: string, edit: boolean): void {
+// `edit`: open the new note's card; otherwise the mark is a plain highlight. `replace`: keys of
+// notes removed in the same step.
+function addNote(anchor: Anchor, label: string, body: string, edit: boolean, replace: string[] = []): void {
   if (edit) {
     pendingFocus = formatAnchor(anchor);
+    // Replacing marks keeps the new one even without a note (the old highlight would be lost), so does
+    // an area (its snapshot is the note).
+    if (replace.length === 0 && !body) {
+      freshNotes.add(pendingFocus);
+    }
   }
-  post({ type: 'addNote', anchor, label, body });
+  post({ type: 'addNote', anchor, label, body, replace });
+}
+
+// Rects on the same line that share some width.
+function overlaps(a: Rect, b: Rect): boolean {
+  const w = Math.min(a.x + a.w, b.x + b.w) - Math.max(a.x, b.x);
+  const h = Math.min(a.y + a.h, b.y + b.h) - Math.max(a.y, b.y);
+  return w > 0 && h > Math.min(a.h, b.h) / 2;
 }
 
 function pdfSelection(): { range: Range; pv: PageView } | undefined {
@@ -598,7 +695,13 @@ function markSelection(color: string, edit: boolean): void {
   const label = current.range.toString().replace(/\s+/g, ' ').trim();
   window.getSelection()!.removeAllRanges();
   if (rects.length > 0 && label) {
-    addNote({ page: current.pv.num, rects, area: false, color }, label, '', edit);
+    // Text marks under the selection are replaced by the new one (e.g. to change the color); their
+    // notes move over to it.
+    const replaced = latestSections.filter(
+      (s) => s.anchor && !s.anchor.area && s.page === current.pv.num && s.anchor.rects.some((r) => rects.some((n) => overlaps(r, n))),
+    );
+    const body = replaced.map((s) => s.body).filter(Boolean).join('\n\n');
+    addNote({ page: current.pv.num, rects, area: false, color }, label, body, edit, replaced.map((s) => s.key));
   }
 }
 
@@ -615,7 +718,7 @@ async function snapshot(pv: PageView, r: Rect): Promise<string> {
 
 async function addAreaNote(pv: PageView, r: Rect): Promise<void> {
   const path = await snapshot(pv, r);
-  addNote({ page: pv.num, rects: [r], area: true, color: 'yellow' }, 'Area', `![](${path})`, true);
+  addNote({ page: pv.num, rects: [r], area: true, color: randomColor(pv.num) }, 'Area', `![${SNAPSHOT_ALT}](${path})`, true);
 }
 
 // Alt + drag on a page marks an area.
@@ -711,12 +814,15 @@ viewer.addEventListener('click', (e) => {
 
 viewer.addEventListener('mousemove', (e) => {
   const pv = pageOf(e.target as Node);
+  hoveredMark = undefined;
   if (pv) {
     const note = noteAt(pv, e);
     setHover(note?.key);
+    hoveredMark = note?.key;
     pv.pageEl.classList.toggle('over-mark', !!note);
   }
 });
+viewer.addEventListener('mouseleave', () => (hoveredMark = undefined));
 
 // The connector of the focused card is emphasized.
 for (const type of ['focusin', 'focusout']) {
@@ -774,13 +880,45 @@ window.addEventListener(
   'keydown',
   (e) => {
     document.body.classList.toggle('alt', e.altKey);
-    if (isDrawingOpen() || !e.altKey || e.metaKey || e.ctrlKey) {
+    if (isDrawingOpen()) {
+      return;
+    }
+    // Delete/Backspace over a mark removes it with its note (unless typing somewhere).
+    const typing = (document.activeElement as HTMLElement | null)?.closest('.card, [contenteditable="true"], input, textarea');
+    // Cmd+Z / Cmd+Shift+Z outside the cards undo/redo adding and deleting marks and notes.
+    if ((e.metaKey || e.ctrlKey) && e.key.toLowerCase() === 'z' && !typing && !e.altKey) {
+      e.preventDefault();
+      post({ type: 'undo', redo: e.shiftKey });
+      return;
+    }
+    if ((e.key === 'Delete' || e.key === 'Backspace') && hoveredMark && !typing && !e.altKey && !e.metaKey && !e.ctrlKey) {
+      e.preventDefault();
+      removeNote(hoveredMark);
+      hoveredMark = undefined;
+      setHover(undefined);
+      return;
+    }
+    if (!e.altKey || e.metaKey || e.ctrlKey) {
+      return;
+    }
+    // Alt+Y in a card: collapse the list item or heading section at the cursor (like in notes).
+    // The card is found from the focus (the last active editor may be another card).
+    const focused = (document.activeElement as HTMLElement | null)?.closest('.card');
+    if ((e.key === '¥' || e.key.toLowerCase() === 'y') && focused) {
+      e.preventDefault();
+      e.stopImmediatePropagation();
+      const editor = [...cards.values()].find((c) => c.el === focused)?.editor;
+      if (editor) {
+        toggleFold(editor.view());
+        editor.view().focus();
+      }
       return;
     }
     // Selected text: Alt+Q/W/E/R highlights it (like in notes), with Shift also opens a note on it;
-    // Alt+A = yellow with a note.
-    const color = e.code === 'KeyA' ? 'yellow' : HIGHLIGHT_KEYS[e.code];
-    if (color && pdfSelection()) {
+    // Alt+A = random color with a note.
+    const current = pdfSelection();
+    const color = current && e.code === 'KeyA' ? randomColor(current.pv.num) : HIGHLIGHT_KEYS[e.code];
+    if (color && current) {
       e.preventDefault();
       e.stopImmediatePropagation();
       markSelection(color, e.shiftKey || e.code === 'KeyA');
@@ -805,6 +943,7 @@ window.addEventListener('message', async (event) => {
       distUri = msg.distUri;
       notesWidth = msg.notesWidth;
       latestSections = msg.sections;
+      folds = msg.folds;
       await loadPdf(msg.pdfUrl);
       break;
     case 'notes':
