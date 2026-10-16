@@ -1,6 +1,6 @@
 import * as vscode from 'vscode';
 import { adoptAssets, cleanupAssets, saveImage } from './assets';
-import { DrawingServer, getDrawingDevice } from './drawingServer';
+import { DrawingServer, type DrawingFile, type DrawingTarget, getDrawingDevice } from './drawingServer';
 
 const CLAUDE_MENTION_COMMAND = 'claude-vscode.insertAtMention';
 
@@ -13,7 +13,7 @@ type WebviewMessage =
   | { type: 'edit'; text: string }
   | { type: 'saveImage'; id: number; name: string; mime: string; data: string }
   | { type: 'selection'; text: string }
-  | { type: 'drawRemote'; id: number; drawing: unknown };
+  | { type: 'drawRemote'; id: number; drawing: unknown; src: string | null };
 
 export class LiveEditorProvider implements vscode.CustomTextEditorProvider {
   static readonly viewType = 'mdLive.editor';
@@ -125,7 +125,7 @@ export class LiveEditorProvider implements vscode.CustomTextEditorProvider {
           break;
         }
         case 'drawRemote': {
-          const file = await this.drawingServer.draw(msg.drawing);
+          const file = await this.drawingServer.draw(msg.drawing, { note: document.uri.toString(), src: msg.src });
           const path = file ? await saveImage(document.uri, file.name, file.mime, file.data) : null;
           panel.webview.postMessage({ type: 'drawingSaved', id: msg.id, path });
           break;
@@ -193,6 +193,25 @@ async function applyMinimalEdit(document: vscode.TextDocument, text: string): Pr
     text.slice(start, endNew),
   );
   await vscode.workspace.applyEdit(edit);
+}
+
+// Saves a drawing the webview no longer waits for (VS Code reloaded, another drawing edited instead
+// on the iPad) into its note: replaces the old link (file names are unique timestamps) or, for a new
+// drawing or a removed link, appends it at the end.
+export async function saveToNote(file: DrawingFile, target: DrawingTarget): Promise<void> {
+  const note = vscode.Uri.parse(target.note);
+  const document = await vscode.workspace.openTextDocument(note);
+  const wasDirty = document.isDirty;
+  const path = await saveImage(note, file.name, file.mime, file.data);
+  const text = document.getText();
+  await applyMinimalEdit(
+    document,
+    target.src && text.includes(target.src) ? text.split(target.src).join(path) : `${text.trimEnd()}\n\n![](${path})\n`,
+  );
+  if (!wasDirty) {
+    await document.save();
+  }
+  vscode.window.showInformationMessage(`Drawing from the iPad saved in ${decodeURIComponent(note.path.split('/').pop()!)}.`);
 }
 
 // Approximates rendered text for comparing against the webview's plain-text selection.

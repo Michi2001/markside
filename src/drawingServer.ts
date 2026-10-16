@@ -72,7 +72,9 @@ const PAGE = `<!DOCTYPE html>
 // `drawing` is the webview's Drawing (strokes + optional background image), passed through as is.
 // `file` is the drawing (or restored image) to save: name, mime and base64 data.
 export type DrawingFile = { name: string; mime: string; data: string };
-type Pending = { id: number; drawing: unknown; resolve: (file: DrawingFile | null) => void };
+// Where a drawing belongs: the note (URI) and the image link in it (null for a new drawing).
+export type DrawingTarget = { note: string; src: string | null };
+type Pending = { id: number; drawing: unknown; target: DrawingTarget; resolve: (file: DrawingFile | null) => void };
 
 export function getDrawingDevice(): string {
   return vscode.workspace.getConfiguration('mdLive').get<string>('drawingDevice', 'mac');
@@ -88,13 +90,16 @@ export class DrawingServer implements vscode.Disposable {
   private idle: NodeJS.Timeout | undefined;
   private readonly clients = new Set<http.ServerResponse>();
   private pending: Pending | undefined;
-  private nextId = 1;
+  // Results already handled: a resend (response lost on the way) is acknowledged but not saved twice.
+  private readonly handled = new Set<number>();
 
   constructor(
     private readonly distUri: vscode.Uri,
     private readonly token: string,
     // Profile of the separate Chrome instance for the Sidecar window.
     private readonly browserDir: string,
+    // Saves a result nobody waits for anymore into its note.
+    private readonly saveToNote: (file: DrawingFile, target: DrawingTarget) => Promise<void>,
   ) {}
 
   // Starts the server (if needed) and (re)arms the idle timeout.
@@ -116,7 +121,10 @@ export class DrawingServer implements vscode.Disposable {
 
   stop(): void {
     clearTimeout(this.idle);
-    this.cancel();
+    // No `cancel` to the iPad: its canvas stays open (VS Code reload, setting change), and the
+    // result it sends later is saved into its note via `saveToNote`.
+    this.pending?.resolve(null);
+    this.pending = undefined;
     clearInterval(this.keepalive);
     this.clients.forEach((c) => c.end());
     this.clients.clear();
@@ -142,7 +150,7 @@ export class DrawingServer implements vscode.Disposable {
   }
 
   // Opens the drawing surface on the iPad and waits for the result (null = cancelled/empty).
-  draw(drawing: unknown): Promise<DrawingFile | null> {
+  draw(drawing: unknown, target: DrawingTarget): Promise<DrawingFile | null> {
     this.start();
     const sidecar = getDrawingDevice() === 'sidecar';
     const title = sidecar
@@ -159,7 +167,7 @@ export class DrawingServer implements vscode.Disposable {
         (_progress, cancel) => {
           cancel.onCancellationRequested(() => this.cancel());
           // The idle timeout counts from the end of the request.
-          return this.request(drawing).finally(() => this.server && this.start());
+          return this.request(drawing, target).finally(() => this.server && this.start());
         },
       ),
     );
@@ -211,12 +219,13 @@ export class DrawingServer implements vscode.Disposable {
     spawn('open', ['-na', CHROME, '--args', ...args], { detached: true, stdio: 'ignore' }).unref();
   }
 
-  private request(drawing: unknown): Promise<DrawingFile | null> {
+  private request(drawing: unknown, target: DrawingTarget): Promise<DrawingFile | null> {
     this.cancel();
     return new Promise((resolve) => {
-      const id = this.nextId++;
-      this.pending = { id, drawing, resolve };
-      this.broadcast('draw', { id, drawing });
+      // Unique across restarts of the extension, so the iPad's draft never matches a wrong request.
+      const id = Date.now();
+      this.pending = { id, drawing, target, resolve };
+      this.broadcast('draw', { id, drawing, target });
     });
   }
 
@@ -256,21 +265,38 @@ export class DrawingServer implements vscode.Disposable {
       this.clients.add(res);
       req.on('close', () => this.clients.delete(res));
       if (this.pending) {
-        this.broadcast('draw', { id: this.pending.id, drawing: this.pending.drawing }, [res]);
+        const { id, drawing, target } = this.pending;
+        this.broadcast('draw', { id, drawing, target }, [res]);
       }
     } else if (route === 'result' && req.method === 'POST') {
       const chunks: Buffer[] = [];
       for await (const chunk of req) {
         chunks.push(chunk as Buffer);
       }
-      const { id, file } = JSON.parse(Buffer.concat(chunks).toString('utf8'));
+      const { id, file, target } = JSON.parse(Buffer.concat(chunks).toString('utf8'));
       res.writeHead(204).end();
+      if (this.handled.has(id)) {
+        return;
+      }
       const pending = this.pending;
       if (pending && pending.id === id) {
+        this.handled.add(id);
         this.pending = undefined;
         // Closes the canvas on other open iPad pages.
         this.broadcast('cancel', { id });
         pending.resolve(file);
+      } else if (file) {
+        this.handled.add(id);
+        await this.saveToNote(file, target);
+      }
+    } else if (route === 'asset') {
+      // The original image of a drawing the iPad reopens from its draft (the draft keeps no image data).
+      const params = new URL(req.url ?? '/', 'http://localhost').searchParams;
+      const uri = vscode.Uri.joinPath(vscode.Uri.parse(params.get('note')!), '..', decodeURIComponent(params.get('src')!));
+      if (fs.existsSync(uri.fsPath)) {
+        res.writeHead(200).end(await vscode.workspace.fs.readFile(uri));
+      } else {
+        res.writeHead(404).end();
       }
     } else {
       res.writeHead(404).end();

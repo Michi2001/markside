@@ -27,7 +27,7 @@ const HIGHLIGHTER_PALETTE = ['#fff200', '#ffc94d', '#7cfc7c', '#5ef0e0', '#7fb8f
 // Size steps per tool, from fine to very bold.
 const SIZES = { pen: [1, 2, 4, 8, 14], highlighter: [8, 14, 22, 32, 44] };
 
-type Stroke = {
+export type Stroke = {
   color: string;
   size: number;
   // Real pen pressure; mouse input (or Sidecar without pressure) simulates it from speed.
@@ -39,7 +39,7 @@ type Stroke = {
 
 // Fixed background image in world coordinates (drawing on a picture).
 // `nodeWidth` is the image's width attr in the note, restored when all strokes are removed.
-type Background = { href: string; x: number; y: number; width: number; height: number; nodeWidth: number };
+export type Background = { href: string; x: number; y: number; width: number; height: number; nodeWidth: number };
 export type Drawing = { strokes: Stroke[]; image?: Background };
 // A file for `saveImage` (base64 data).
 export type DrawingFile = { name: string; mime: string; data: string };
@@ -107,7 +107,7 @@ export function isDrawingOpen(): boolean {
   return open;
 }
 
-function parseDrawing(svg: string): Drawing {
+export function parseDrawing(svg: string): Drawing {
   const json = /<metadata id="mdlive-drawing">([\s\S]*?)<\/metadata>/.exec(svg)?.[1];
   if (!json) {
     console.warn('No drawing data in SVG');
@@ -122,14 +122,17 @@ export async function loadDrawing(url: string): Promise<Drawing> {
   return parseDrawing(await (await fetch(url)).text());
 }
 
-// A new drawing on top of an image, shown `width` px wide (as in the note).
-export async function imageDrawing(url: string, width: number, nodeWidth: number): Promise<Drawing> {
-  const blob = await (await fetch(url)).blob();
-  const href = await new Promise<string>((resolve) => {
+export function blobToDataUrl(blob: Blob): Promise<string> {
+  return new Promise((resolve) => {
     const reader = new FileReader();
     reader.onload = () => resolve(reader.result as string);
     reader.readAsDataURL(blob);
   });
+}
+
+// A new drawing on top of an image, shown `width` px wide (as in the note).
+export async function imageDrawing(url: string, width: number, nodeWidth: number): Promise<Drawing> {
+  const href = await blobToDataUrl(await (await fetch(url)).blob());
   const img = new Image();
   img.src = href;
   await img.decode();
@@ -361,7 +364,12 @@ function separator(): HTMLElement {
 // Mac, one finger on the iPad), zooming only scales it (pinch, Ctrl+wheel). Saved sizes don't change.
 // With a background image the surface is white and the image lies fixed under the strokes.
 // Resolves with the drawing, or null if cancelled (also via `signal`) or empty.
-export function openDrawingEditor(initial: Drawing, signal?: AbortSignal): Promise<Drawing | null> {
+// `onChange` gets the strokes after every change (the iPad page keeps a draft with them).
+export function openDrawingEditor(
+  initial: Drawing,
+  signal?: AbortSignal,
+  onChange?: (strokes: Stroke[]) => void,
+): Promise<Drawing | null> {
   open = true;
   let strokes = initial.strokes;
   const image = initial.image;
@@ -533,6 +541,7 @@ export function openDrawingEditor(initial: Drawing, signal?: AbortSignal): Promi
     undoStack.push(strokes);
     redoStack.length = 0;
     strokes = next;
+    onChange?.(strokes);
   };
 
   const clearSelection = (): void => {
@@ -702,6 +711,7 @@ export function openDrawingEditor(initial: Drawing, signal?: AbortSignal): Promi
     if (from.length > 0) {
       to.push(strokes);
       strokes = from.pop()!;
+      onChange?.(strokes);
       clearSelection();
       redraw();
     }

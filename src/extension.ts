@@ -2,7 +2,7 @@ import * as crypto from 'crypto';
 import * as vscode from 'vscode';
 import { registerAssetSync } from './assets';
 import { DrawingServer, getDrawingDevice } from './drawingServer';
-import { LiveEditorProvider } from './liveEditor';
+import { LiveEditorProvider, saveToNote } from './liveEditor';
 
 export function activate(context: vscode.ExtensionContext): void {
   // Persisted so the URL bookmarked on the iPad stays valid.
@@ -16,6 +16,7 @@ export function activate(context: vscode.ExtensionContext): void {
     vscode.Uri.joinPath(context.extensionUri, 'dist'),
     token,
     vscode.Uri.joinPath(context.globalStorageUri, 'sidecar-browser').fsPath,
+    saveToNote,
   );
   const provider = new LiveEditorProvider(context.extensionUri, drawingServer);
 

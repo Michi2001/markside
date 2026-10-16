@@ -76,9 +76,10 @@ async function drawLocally(drawing: Drawing): Promise<string | null> {
 }
 
 // The extension sends the drawing to the drawing page (iPad or browser window) and saves the result.
-function drawRemotely(drawing: Drawing): Promise<string | null> {
+// `src` (the edited image, none for a new drawing) lets the extension place a late result itself.
+function drawRemotely(drawing: Drawing, src?: string): Promise<string | null> {
   const id = ++uploadCounter;
-  vscode.postMessage({ type: 'drawRemote', id, drawing });
+  vscode.postMessage({ type: 'drawRemote', id, drawing, src: src ?? null });
   return new Promise((resolve) => pendingDrawings.set(id, resolve));
 }
 
@@ -91,7 +92,7 @@ async function editDrawing(src?: string, getPos?: () => number | undefined, widt
     : isDrawing(src)
       ? await loadDrawing(resolveUrl(src))
       : await imageDrawing(resolveUrl(src), width!, nodeWidth!);
-  const path = drawingDevice === 'mac' ? await drawLocally(drawing) : await drawRemotely(drawing);
+  const path = drawingDevice === 'mac' ? await drawLocally(drawing) : await drawRemotely(drawing, src);
   if (!path) {
     getView().focus();
     return;
