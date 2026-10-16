@@ -9,6 +9,9 @@ const ASSET_REF = /(?<=[("'<])([^\s/()"'<>]+)\.assets\/([\w.-]+)/g;
 
 // Collapsed headings of the note (view state of the live editor), kept with the images so it moves with the note.
 const FOLDS_FILE = '.folds.json';
+// Context for a question to Claude about a PDF (Alt+K), rewritten on every question.
+const CLAUDE_FILE = '.claude.md';
+const KEEP_FILES = [FOLDS_FILE, CLAUDE_FILE];
 
 const MIME_EXTENSIONS: Record<string, string> = {
   'image/png': '.png',
@@ -69,6 +72,14 @@ export async function saveImage(note: vscode.Uri, name: string, mime: string, da
   const fileName = `${Date.now()}${ext}`;
   await fs.writeFile(vscode.Uri.joinPath(dir, fileName), Buffer.from(data, 'base64'));
   return assetsRef(note) + fileName;
+}
+
+export async function writeClaudeContext(note: vscode.Uri, text: string): Promise<vscode.Uri> {
+  const dir = assetsDir(note);
+  await fs.createDirectory(dir);
+  const file = vscode.Uri.joinPath(dir, CLAUDE_FILE);
+  await fs.writeFile(file, Buffer.from(text));
+  return file;
 }
 
 // Collapsed headings: a list for a note, a list per card (keyed by section) for PDF notes.
@@ -142,7 +153,7 @@ export async function cleanupAssets(document: vscode.TextDocument): Promise<void
   // Unsaved text counts too, so an image pasted right before closing survives until the save lands.
   const text = (await readText(document.uri)) + document.getText();
   for (const [name, type] of await fs.readDirectory(dir)) {
-    if (type === vscode.FileType.File && name !== FOLDS_FILE && !text.includes(name)) {
+    if (type === vscode.FileType.File && !KEEP_FILES.includes(name) && !text.includes(name)) {
       await fs.delete(vscode.Uri.joinPath(dir, name), { useTrash: true });
     }
   }

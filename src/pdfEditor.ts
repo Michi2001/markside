@@ -1,10 +1,10 @@
 import * as vscode from 'vscode';
-import { adoptAssets, cleanupAssets, loadFolds, notesUri, saveFolds, saveImage } from './assets';
+import { adoptAssets, cleanupAssets, loadFolds, notesUri, saveFolds, saveImage, writeClaudeContext } from './assets';
 import { DrawingServer, getDrawingDevice } from './drawingServer';
 import type { FontSizes } from './fontSizes';
 import { applyMinimalEdit, getTheme, sendSelectionToClaude } from './liveEditor';
 import { preserveSource } from './preserve';
-import { type Anchor, type Section, addNote, deleteNote, formatAnchor, parseSections, setNoteBody } from './sidecar';
+import { type Anchor, type Rect, type Section, addNote, deleteNote, formatAnchor, parseSections, setNoteBody } from './sidecar';
 import type { Fold } from './webview/fold';
 
 type WebviewMessage =
@@ -16,6 +16,7 @@ type WebviewMessage =
   | { type: 'folds'; folds: Record<string, Fold[]> }
   | { type: 'saveImage'; id: number; name: string; mime: string; data: string }
   | { type: 'selection'; text: string }
+  | { type: 'askClaude'; page: number; quote?: string; rects?: Rect[]; key?: string }
   | { type: 'drawRemote'; id: number; drawing: unknown; src: string | null };
 
 const SAVE_DELAY_MS = 800;
@@ -259,6 +260,16 @@ export class PdfEditorProvider implements vscode.CustomReadonlyEditorProvider {
           await note.save();
           await sendSelectionToClaude(note, panel, msg.text);
           break;
+        case 'askClaude': {
+          await editQueue;
+          if (note?.isDirty) {
+            await note.save();
+          }
+          const context = claudeContext(pdf, note?.getText(), msg);
+          const file = await writeClaudeContext(notes, context);
+          await sendSelectionToClaude(await vscode.workspace.openTextDocument(file), panel, '');
+          break;
+        }
       }
     });
   }
@@ -292,6 +303,55 @@ export class PdfEditorProvider implements vscode.CustomReadonlyEditorProvider {
 </body>
 </html>`;
   }
+}
+
+// Tells Claude where the question points (page, passage or mark) and which pages to read, so it
+// loads only those pages of the PDF; the notes on that page are included.
+function claudeContext(
+  pdf: vscode.Uri,
+  notesText: string | undefined,
+  { page, quote, rects, key }: { page: number; quote?: string; rects?: Rect[]; key?: string },
+): string {
+  const rel = (uri: vscode.Uri) => vscode.workspace.asRelativePath(uri, false);
+  const sections = parseSections(notesText ?? '').filter((s) => s.page === page && (s.anchor || s.body.trim()));
+  const mark = sections.find((s) => s.key === key);
+  const lines = [
+    `# Question about \`${rel(pdf)}\`, page ${page}`,
+    '',
+    `Read only the pages you need from \`${rel(pdf)}\` (Read tool with \`pages\`): page ${page} first, other pages only if the question needs them.`,
+  ];
+  if (notesText !== undefined) {
+    lines.push(
+      `My notes on the whole PDF are in \`${rel(notesUri(pdf))}\`: \`## Page N\` is a note on page N, \`### [quote](#pN=x,y,w,h;…)\` a note on a marked passage (or area, \`&area\`) of page N, rectangles as fractions of the page from the top left.`,
+    );
+  }
+  // The position tells apart passages that occur more than once on the page.
+  const anchor = rects ? formatAnchor({ page, rects, area: false, color: 'yellow' }) : mark?.key;
+  const passage = quote ?? (mark?.anchor?.area ? undefined : mark?.label);
+  if (passage) {
+    lines.push('', '## Marked passage', '', `> ${passage}`, '', `Position: \`#${anchor}\``);
+  }
+  if (mark?.anchor?.area) {
+    lines.push('', '## Marked area', '', `\`#${mark.key}\` on page ${page}; its snapshot is the image at the start of that note below.`);
+  }
+  if (sections.length > 0) {
+    lines.push(
+      '',
+      `## My notes on page ${page}`,
+      '',
+      `Excerpt from \`${rel(notesUri(pdf))}\` (image paths are relative to its folder):`,
+      '',
+      fenced(sections.map((s) => notesText!.slice(s.start, s.end).trim()).join('\n\n')),
+    );
+  }
+  return lines.join('\n').trimEnd() + '\n';
+}
+
+// A code fence longer than any backtick run inside, so the notes' own headings and fences stay quoted.
+function fenced(text: string): string {
+  const longest = Math.max(2, ...(text.match(/`+/g) ?? []).map((m) => m.length));
+  const fence = '`'.repeat(longest + 1);
+  return `${fence}markdown\n${text}\n${fence}`;
 }
 
 function getNotesWidth(): number {

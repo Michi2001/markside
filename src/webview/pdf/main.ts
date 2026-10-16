@@ -318,6 +318,7 @@ function updateCard(card: Card, section: Section): void {
   card.el.dataset.color = anchor?.color ?? '';
   setCustomColor(card.el, anchor?.color);
   card.el.classList.toggle('page-note', !anchor);
+  card.el.classList.toggle('area', !!anchor?.area);
   card.el.classList.toggle('empty', !card.source.trim());
   const label = card.el.querySelector('.card-label') as HTMLElement;
   label.textContent = anchor ? (anchor.area ? section.label || 'Area' : `„${section.label}“`) : `Page ${section.page}`;
@@ -758,6 +759,31 @@ function startArea(pv: PageView, e: MouseEvent): void {
   window.addEventListener('mouseup', up);
 }
 
+// ---------- Claude ----------
+
+// The page taking up most of the window.
+function pageInView(): PageView | undefined {
+  const visible = (pv: PageView) => {
+    const r = pv.pageEl.getBoundingClientRect();
+    return Math.min(r.bottom, window.innerHeight) - Math.max(r.top, 0);
+  };
+  return pages.reduce<PageView | undefined>((best, pv) => (!best || visible(pv) > visible(best) ? pv : best), undefined);
+}
+
+function askClaude(): void {
+  const current = pdfSelection();
+  if (current) {
+    const quote = current.range.toString().replace(/\s+/g, ' ').trim();
+    post({ type: 'askClaude', page: current.pv.num, quote, rects: selectionRects(current.range, current.pv) });
+    return;
+  }
+  const mark = latestSections.find((s) => s.key === hoveredMark);
+  const page = mark?.page ?? pageInView()?.num;
+  if (page) {
+    post({ type: 'askClaude', page, key: mark?.key });
+  }
+}
+
 // Color dots shown next to a text selection on a page.
 const popover = el('div', 'popover', document.body);
 popover.hidden = true;
@@ -922,6 +948,14 @@ window.addEventListener(
         toggleFold(editor.view());
         editor.view().focus();
       }
+      return;
+    }
+    // Alt+K outside the cards asks Claude about the selected text, the mark under the pointer or the
+    // page in view (inside a card it mentions the card's text, see installShortcuts).
+    if (e.code === 'KeyK' && !focused) {
+      e.preventDefault();
+      e.stopImmediatePropagation();
+      askClaude();
       return;
     }
     // Selected text: Alt+Q/W/E/R highlights it (like in notes), with Shift also opens a note on it;

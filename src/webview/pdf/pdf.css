@@ -279,6 +279,39 @@ body.alt .page .textLayer span {
   line-height: 1.4;
 }
 
+/* Area notes show no title (the color links them to their area); only × remains, in the top right
+   corner, so the head takes no space. */
+.card.area {
+  padding-top: 6px;
+}
+
+.card.area .card-label {
+  display: none;
+}
+
+.card.area .card-head {
+  position: absolute;
+  top: 4px;
+  right: 4px;
+  z-index: 1;
+  padding: 0;
+}
+
+.card.area .card-delete:not(:hover) {
+  background: var(--vscode-editorWidget-background, var(--vscode-editor-background));
+}
+
+/* Text notes: the quote as one small line. */
+.card:not(.page-note):not(.area) .card-head {
+  padding-top: 3px;
+  font-size: 11px;
+}
+
+.card:not(.page-note):not(.area) .card-label {
+  -webkit-line-clamp: 1;
+  line-height: 18px;
+}
+
 .card.page-note .card-label {
   font-style: normal;
   font-weight: 600;
@@ -334,7 +367,31 @@ body.alt .page .textLayer span {
 
 .card .milkdown .ProseMirror {
   max-width: none;
-  padding: 2px 12px 8px;
+  padding: 2px 12px 4px;
+}
+
+/* Denser than in notes: lower lines, bullets without extra space. */
+.card .milkdown .ProseMirror p {
+  line-height: 1.4;
+  padding: 2px 0;
+}
+
+.card .milkdown .milkdown-list-item-block li p {
+  padding: 0;
+}
+
+/* The empty paragraph Crepe's `trailing` plugin keeps after a final list only shows while editing. */
+.card:not(:focus-within) .milkdown .ProseMirror > p:last-child:not(:first-child):has(> br:only-child) {
+  display: none;
+}
+
+.card .milkdown .milkdown-list-item-block li .label-wrapper,
+.card .milkdown .milkdown-list-item-block li .label-wrapper .label {
+  height: 1.4em;
+}
+
+.card .milkdown .milkdown-list-item-block li .label-wrapper .label {
+  padding: 0;
 }
 
 .card .milkdown .milkdown-table-block {
