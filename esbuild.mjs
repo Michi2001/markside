@@ -1,4 +1,5 @@
 import * as esbuild from 'esbuild';
+import { cpSync } from 'fs';
 
 const watch = process.argv.includes('--watch');
 
@@ -26,6 +27,19 @@ const configs = [
     assetNames: 'assets/[name]-[hash]',
   },
   {
+    // PDF view with notes (src/pdfEditor.ts).
+    entryPoints: ['src/webview/pdf/main.ts'],
+    bundle: true,
+    outfile: 'dist/pdf.js',
+    platform: 'browser',
+    format: 'iife',
+    target: 'es2022',
+    minify: !watch,
+    sourcemap: watch,
+    loader: { '.woff': 'file', '.woff2': 'file', '.ttf': 'file' },
+    assetNames: 'assets/[name]-[hash]',
+  },
+  {
     // Drawing page for the iPad, served by src/drawingServer.ts.
     entryPoints: ['src/ipad/main.ts'],
     bundle: true,
@@ -36,6 +50,13 @@ const configs = [
     minify: !watch,
   },
 ];
+
+// pdf.js loads its worker, CMaps, standard fonts and image decoders at runtime.
+const pdfjs = 'node_modules/pdfjs-dist';
+cpSync(`${pdfjs}/build/pdf.worker.min.mjs`, 'dist/pdf.worker.min.mjs');
+for (const dir of ['cmaps', 'standard_fonts', 'wasm']) {
+  cpSync(`${pdfjs}/${dir}`, `dist/pdfjs/${dir}`, { recursive: true });
+}
 
 if (watch) {
   for (const config of configs) {

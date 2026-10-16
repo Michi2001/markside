@@ -1,0 +1,373 @@
+/* PDF pages with note cards in the right margin. Notes use the editor styles of style.css. */
+
+:root {
+  --mark-yellow: rgba(255, 208, 0, 0.38);
+  --mark-red: rgba(255, 70, 110, 0.3);
+  --mark-green: rgba(60, 200, 90, 0.32);
+  --mark-blue: rgba(70, 140, 255, 0.3);
+  --line-yellow: #e0b000;
+  --line-red: #f0506e;
+  --line-green: #3cb35a;
+  --line-blue: #468cff;
+}
+
+/* Left/right padding: VIEWER_PADDING in main.ts. */
+#viewer {
+  padding: 24px 24px 24px 48px;
+}
+
+.row {
+  position: relative;
+  display: flex;
+  align-items: flex-start;
+  gap: 24px;
+  width: fit-content;
+  margin: 0 0 24px;
+}
+
+.page {
+  position: relative;
+  flex: none;
+  background: #fff;
+  box-shadow: 0 1px 4px rgba(0, 0, 0, 0.25);
+  --scale-round-x: 1px;
+  --scale-round-y: 1px;
+}
+
+.page > canvas {
+  position: absolute;
+  inset: 0;
+  width: 100%;
+  height: 100%;
+}
+
+.margin {
+  position: relative;
+  flex: none;
+}
+
+/* Columns far from the viewport (with their editors) skip rendering, e.g. on every zoom step; their
+   size is set explicitly. Not on near ones: it would clip Crepe's menus and toolbars. */
+.margin.far {
+  content-visibility: hidden;
+}
+
+/* ---------- Text layer (from pdf.js' pdf_viewer.css) ---------- */
+
+.textLayer {
+  color-scheme: only light;
+  position: absolute;
+  text-align: initial;
+  inset: 0;
+  overflow: clip;
+  opacity: 1;
+  line-height: 1;
+  letter-spacing: normal;
+  word-spacing: normal;
+  text-size-adjust: none;
+  forced-color-adjust: none;
+  transform-origin: 0 0;
+  caret-color: CanvasText;
+  z-index: 2;
+  --min-font-size: 1;
+  --text-scale-factor: calc(var(--total-scale-factor) * var(--min-font-size));
+  --min-font-size-inv: calc(1 / var(--min-font-size));
+}
+
+.textLayer :is(span, br) {
+  color: transparent;
+  position: absolute;
+  white-space: pre;
+  cursor: text;
+  transform-origin: 0% 0%;
+  user-select: text;
+}
+
+.textLayer > :not(.markedContent),
+.textLayer .markedContent span:not(.markedContent) {
+  z-index: 1;
+  --font-height: 0;
+  font-size: calc(var(--text-scale-factor) * var(--font-height));
+  --scale-x: 1;
+  --rotate: 0deg;
+  transform: rotate(var(--rotate)) scaleX(var(--scale-x)) scale(var(--min-font-size-inv));
+}
+
+.textLayer .markedContent {
+  display: contents;
+}
+
+.textLayer span[role='img'] {
+  user-select: none;
+  cursor: default;
+}
+
+.textLayer ::selection {
+  background: rgba(0, 100, 255, 0.25);
+  color: transparent;
+}
+
+.textLayer br::selection {
+  background: transparent;
+}
+
+.textLayer .endOfContent {
+  display: block;
+  position: absolute;
+  inset: 100% 0 0;
+  z-index: 0;
+  cursor: default;
+  user-select: none;
+}
+
+.textLayer.selecting .endOfContent {
+  top: 0;
+}
+
+.page.over-mark .textLayer span {
+  cursor: pointer;
+}
+
+/* Alt held: drag marks an area. */
+body.alt .page,
+body.alt .page .textLayer span {
+  cursor: crosshair;
+}
+
+/* ---------- Marks ---------- */
+
+.marks {
+  position: absolute;
+  inset: 0;
+  z-index: 1;
+  pointer-events: none;
+}
+
+.mark {
+  position: absolute;
+  background: var(--mark-yellow);
+  mix-blend-mode: multiply;
+  border-radius: 2px;
+}
+
+.mark[data-color='red'] { background: var(--mark-red); }
+.mark[data-color='green'] { background: var(--mark-green); }
+.mark[data-color='blue'] { background: var(--mark-blue); }
+
+.mark.area {
+  background: none;
+  mix-blend-mode: normal;
+  outline: 2px solid var(--line-yellow);
+  outline-offset: 1px;
+}
+
+.mark.area[data-color='red'] { outline-color: var(--line-red); }
+.mark.area[data-color='green'] { outline-color: var(--line-green); }
+.mark.area[data-color='blue'] { outline-color: var(--line-blue); }
+
+.mark.hover {
+  filter: saturate(2.2);
+}
+
+.mark.area.hover {
+  outline-width: 3px;
+}
+
+.marquee {
+  position: absolute;
+  z-index: 3;
+  border: 1.5px dashed var(--line-yellow);
+  background: rgba(255, 208, 0, 0.08);
+  pointer-events: none;
+}
+
+/* ---------- Connector lines ---------- */
+
+.lines {
+  position: absolute;
+  inset: 0;
+  width: 100%;
+  height: 100%;
+  overflow: visible;
+  pointer-events: none;
+  z-index: 1;
+}
+
+.lines path {
+  fill: none;
+  stroke: var(--line-yellow);
+  stroke-width: 1.2;
+  opacity: 0.35;
+}
+
+.lines path[data-color='red'] { stroke: var(--line-red); }
+.lines path[data-color='green'] { stroke: var(--line-green); }
+.lines path[data-color='blue'] { stroke: var(--line-blue); }
+
+.lines path.hover,
+.lines path.focus {
+  opacity: 1;
+  stroke-width: 1.6;
+}
+
+/* ---------- Cards ---------- */
+
+.card {
+  --card-color: var(--line-yellow);
+  position: absolute;
+  left: 0;
+  right: 0;
+  box-sizing: border-box;
+  border: 1px solid var(--vscode-editorWidget-border, rgba(128, 128, 128, 0.35));
+  border-left: 3px solid var(--card-color);
+  border-radius: 6px;
+  background: var(--vscode-editorWidget-background, var(--vscode-editor-background));
+  transition: box-shadow 0.15s;
+}
+
+.card[data-color='red'] { --card-color: var(--line-red); }
+.card[data-color='green'] { --card-color: var(--line-green); }
+.card[data-color='blue'] { --card-color: var(--line-blue); }
+
+.card.page-note {
+  --card-color: var(--vscode-descriptionForeground);
+}
+
+/* Unwritten page notes stay unobtrusive until hovered or focused. */
+.card.page-note.empty:not(:focus-within):not(:hover) {
+  opacity: 0.55;
+  border-left-color: transparent;
+}
+
+.card.page-note .card-delete {
+  display: none;
+}
+
+.card.hover,
+.card:focus-within {
+  box-shadow: 0 2px 10px rgba(0, 0, 0, 0.18);
+}
+
+.card:focus-within {
+  z-index: 2;
+}
+
+.card-head {
+  display: flex;
+  align-items: flex-start;
+  gap: 6px;
+  padding: 6px 6px 0 12px;
+  font-family: var(--vscode-font-family);
+  font-size: 12px;
+  color: var(--vscode-descriptionForeground);
+  cursor: pointer;
+}
+
+.card-label {
+  flex: 1;
+  min-width: 0;
+  overflow: hidden;
+  display: -webkit-box;
+  -webkit-line-clamp: 2;
+  -webkit-box-orient: vertical;
+  font-style: italic;
+  line-height: 1.4;
+}
+
+.card.page-note .card-label {
+  font-style: normal;
+  font-weight: 600;
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+  font-size: 11px;
+}
+
+.card-delete {
+  flex: none;
+  width: 18px;
+  height: 18px;
+  padding: 0;
+  border: none;
+  border-radius: 4px;
+  background: none;
+  color: inherit;
+  font-size: 15px;
+  line-height: 18px;
+  cursor: pointer;
+  opacity: 0;
+}
+
+.card:hover .card-delete,
+.card:focus-within .card-delete {
+  opacity: 0.7;
+}
+
+.card-delete:hover {
+  opacity: 1;
+  background: var(--vscode-list-hoverBackground);
+}
+
+/* Plain text until the card's editor exists. */
+.card-body {
+  min-height: 1.5em;
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+  padding: 2px 12px 8px;
+  font-family: var(--vscode-font-family);
+  font-size: calc(var(--mdlive-font-size, 16px) * 0.875);
+}
+
+.card-body:has(.milkdown) {
+  white-space: normal;
+  padding: 0;
+}
+
+.card .milkdown {
+  --crepe-base-font-size: calc(var(--mdlive-font-size, 16px) * 0.875);
+  background: transparent;
+}
+
+.card .milkdown .ProseMirror {
+  max-width: none;
+  padding: 2px 12px 8px;
+}
+
+.card .milkdown .milkdown-table-block {
+  width: 100%;
+}
+
+/* ---------- Selection popover ---------- */
+
+.popover {
+  position: fixed;
+  z-index: 10;
+  display: flex;
+  gap: 6px;
+  padding: 5px 7px;
+  border-radius: 999px;
+  background: var(--vscode-editorWidget-background, #fff);
+  border: 1px solid var(--vscode-editorWidget-border, rgba(128, 128, 128, 0.35));
+  box-shadow: 0 2px 8px rgba(0, 0, 0, 0.2);
+}
+
+.popover[hidden] {
+  display: none;
+}
+
+.popover .dot {
+  width: 18px;
+  height: 18px;
+  padding: 0;
+  border: 2px solid transparent;
+  border-radius: 50%;
+  background: var(--line-yellow);
+  cursor: pointer;
+}
+
+.popover .dot[data-color='red'] { background: var(--line-red); }
+.popover .dot[data-color='green'] { background: var(--line-green); }
+.popover .dot[data-color='blue'] { background: var(--line-blue); }
+
+.popover .dot:hover {
+  border-color: var(--vscode-editor-foreground);
+}

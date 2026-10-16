@@ -23,6 +23,16 @@
           }
         ],
         "priority": "option"
+      },
+      {
+        "viewType": "mdLive.pdf",
+        "displayName": "PDF with Notes",
+        "selector": [
+          {
+            "filenamePattern": "*.pdf"
+          }
+        ],
+        "priority": "default"
       }
     ],
     "commands": [
@@ -122,32 +132,32 @@
         },
         {
           "command": "mdLive.chooseDrawingDevice.mac",
-          "when": "activeCustomEditorId == mdLive.editor && config.mdLive.drawingDevice == mac",
+          "when": "(activeCustomEditorId == mdLive.editor || activeCustomEditorId == mdLive.pdf) && config.mdLive.drawingDevice == mac",
           "group": "navigation@3"
         },
         {
           "command": "mdLive.chooseDrawingDevice.ipad",
-          "when": "activeCustomEditorId == mdLive.editor && config.mdLive.drawingDevice == ipad",
+          "when": "(activeCustomEditorId == mdLive.editor || activeCustomEditorId == mdLive.pdf) && config.mdLive.drawingDevice == ipad",
           "group": "navigation@3"
         },
         {
           "command": "mdLive.chooseDrawingDevice.ipadUsb",
-          "when": "activeCustomEditorId == mdLive.editor && config.mdLive.drawingDevice == ipadUsb",
+          "when": "(activeCustomEditorId == mdLive.editor || activeCustomEditorId == mdLive.pdf) && config.mdLive.drawingDevice == ipadUsb",
           "group": "navigation@3"
         },
         {
           "command": "mdLive.chooseDrawingDevice.sidecar",
-          "when": "activeCustomEditorId == mdLive.editor && config.mdLive.drawingDevice == sidecar",
+          "when": "(activeCustomEditorId == mdLive.editor || activeCustomEditorId == mdLive.pdf) && config.mdLive.drawingDevice == sidecar",
           "group": "navigation@3"
         },
         {
           "command": "mdLive.chooseTheme",
-          "when": "activeCustomEditorId == mdLive.editor",
+          "when": "(activeCustomEditorId == mdLive.editor || activeCustomEditorId == mdLive.pdf)",
           "group": "navigation@4"
         },
         {
           "command": "mdLive.chooseFontSize",
-          "when": "activeCustomEditorId == mdLive.editor",
+          "when": "(activeCustomEditorId == mdLive.editor || activeCustomEditorId == mdLive.pdf)",
           "group": "navigation@4"
         }
       ],
@@ -170,7 +180,7 @@
         },
         {
           "command": "mdLive.chooseDrawingDevice",
-          "when": "activeCustomEditorId == mdLive.editor"
+          "when": "(activeCustomEditorId == mdLive.editor || activeCustomEditorId == mdLive.pdf)"
         },
         {
           "command": "mdLive.chooseDrawingDevice.mac",
@@ -190,11 +200,11 @@
         },
         {
           "command": "mdLive.chooseTheme",
-          "when": "activeCustomEditorId == mdLive.editor"
+          "when": "(activeCustomEditorId == mdLive.editor || activeCustomEditorId == mdLive.pdf)"
         },
         {
           "command": "mdLive.chooseFontSize",
-          "when": "activeCustomEditorId == mdLive.editor"
+          "when": "(activeCustomEditorId == mdLive.editor || activeCustomEditorId == mdLive.pdf)"
         }
       ]
     },
@@ -221,7 +231,14 @@
           "default": 16,
           "minimum": 8,
           "maximum": 40,
-          "description": "Base font size of notes in the Markdown Live Editor (px); headings and code scale with it."
+          "description": "Default font size of notes (px) at 100 % zoom; headings and code scale with it. 'Choose Font Size' sets a size for a single note or PDF."
+        },
+        "mdLive.pdfNotesWidth": {
+          "type": "number",
+          "default": 360,
+          "minimum": 200,
+          "maximum": 1200,
+          "description": "Space reserved for the notes column next to PDFs when fitting the pages at 100 % zoom (px). The column always fills the rest of the window; zooming magnifies notes and pages together."
         },
         "mdLive.drawingDevice": {
           "type": "string",
@@ -269,6 +286,7 @@
   "dependencies": {
     "@milkdown/crepe": "^7.22.3",
     "@milkdown/kit": "^7.22.3",
+    "pdfjs-dist": "^6.4.299",
     "remark": "^15.0.1",
     "remark-gfm": "^4.0.1",
     "remark-math": "^6.0.0"

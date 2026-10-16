@@ -32,6 +32,15 @@ function assetsRef(note: vscode.Uri): string {
   return encodeURIComponent(noteBase(note)) + ASSETS_SUFFIX + '/';
 }
 
+// The notes file of a PDF: `paper.pdf` → `paper.pdf.md` (images in `paper.pdf.assets/`).
+export function notesUri(pdf: vscode.Uri): vscode.Uri {
+  return pdf.with({ path: pdf.path + '.md' });
+}
+
+function isPdf(uri: vscode.Uri): boolean {
+  return uri.path.toLowerCase().endsWith('.pdf');
+}
+
 function isNote(uri: vscode.Uri): boolean {
   return uri.path.toLowerCase().endsWith('.md');
 }
@@ -156,6 +165,13 @@ export function registerAssetSync(): vscode.Disposable {
   return vscode.Disposable.from(
     vscode.workspace.onDidRenameFiles(async (e) => {
       for (const { oldUri, newUri } of e.files) {
+        // The notes of a PDF follow it; renaming them in turn moves their assets folder.
+        if (isPdf(oldUri) && isPdf(newUri) && (await exists(notesUri(oldUri))) && !(await exists(notesUri(newUri)))) {
+          const edit = new vscode.WorkspaceEdit();
+          edit.renameFile(notesUri(oldUri), notesUri(newUri));
+          await vscode.workspace.applyEdit(edit);
+          continue;
+        }
         if (!isNote(oldUri) || !isNote(newUri)) {
           continue;
         }

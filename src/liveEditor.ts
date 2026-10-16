@@ -2,16 +2,13 @@ import * as vscode from 'vscode';
 import { adoptAssets, cleanupAssets, loadFolds, saveFolds, saveImage } from './assets';
 import { preserveSource } from './preserve';
 import { DrawingServer, type DrawingFile, type DrawingTarget, getDrawingDevice } from './drawingServer';
+import type { FontSizes } from './fontSizes';
 import type { Fold } from './webview/fold';
 
 const CLAUDE_MENTION_COMMAND = 'claude-vscode.insertAtMention';
 
-function getTheme(): string {
+export function getTheme(): string {
   return vscode.workspace.getConfiguration('mdLive').get<string>('theme', 'auto');
-}
-
-function getFontSize(): number {
-  return vscode.workspace.getConfiguration('mdLive').get<number>('fontSize', 16);
 }
 
 // Obsidian-style inline title: the file name with underscores shown as spaces.
@@ -43,6 +40,7 @@ export class LiveEditorProvider implements vscode.CustomTextEditorProvider {
   constructor(
     private readonly extensionUri: vscode.Uri,
     private readonly drawingServer: DrawingServer,
+    private readonly fontSizes: FontSizes,
   ) {}
 
   postToActivePanel(type: 'requestSelection' | 'insertDrawing'): void {
@@ -92,10 +90,16 @@ export class LiveEditorProvider implements vscode.CustomTextEditorProvider {
         panel.webview.postMessage({ type: 'theme', theme: getTheme() });
       }
       if (e.affectsConfiguration('mdLive.fontSize')) {
-        panel.webview.postMessage({ type: 'fontSize', fontSize: getFontSize() });
+        panel.webview.postMessage({ type: 'fontSize', fontSize: this.fontSizes.get(document.uri) });
       }
       if (e.affectsConfiguration('mdLive.drawingDevice')) {
         panel.webview.postMessage({ type: 'drawingDevice', device: getDrawingDevice() });
+      }
+    });
+
+    const fontSizeSub = this.fontSizes.onDidChange((uri) => {
+      if (uri === document.uri.toString()) {
+        panel.webview.postMessage({ type: 'fontSize', fontSize: this.fontSizes.get(document.uri) });
       }
     });
 
@@ -107,6 +111,7 @@ export class LiveEditorProvider implements vscode.CustomTextEditorProvider {
     panel.onDidDispose(() => {
       changeSub.dispose();
       configSub.dispose();
+      fontSizeSub.dispose();
       if (this.activePanel === panel) {
         this.activePanel = undefined;
       }
@@ -127,7 +132,7 @@ export class LiveEditorProvider implements vscode.CustomTextEditorProvider {
             text: document.getText(),
             baseUri: panel.webview.asWebviewUri(docDir).toString() + '/',
             theme: getTheme(),
-            fontSize: getFontSize(),
+            fontSize: this.fontSizes.get(document.uri),
             title: noteTitle(document.uri),
             drawingDevice: getDrawingDevice(),
             folds: await loadFolds(document.uri),
@@ -209,7 +214,7 @@ export class LiveEditorProvider implements vscode.CustomTextEditorProvider {
 }
 
 // Replaces only the changed middle part, so VS Code's undo stack and dirty tracking stay sensible.
-async function applyMinimalEdit(document: vscode.TextDocument, text: string): Promise<void> {
+export async function applyMinimalEdit(document: vscode.TextDocument, text: string): Promise<void> {
   const old = document.getText();
   if (old === text) {
     return;
@@ -319,7 +324,7 @@ function findSourceRange(document: vscode.TextDocument, selected: string): vscod
 
 // The Claude extension only reads selections from real text editors, so we briefly open one,
 // select the matching lines, trigger Claude's own @-mention command and close it again.
-async function sendSelectionToClaude(
+export async function sendSelectionToClaude(
   document: vscode.TextDocument,
   panel: vscode.WebviewPanel,
   selected: string,

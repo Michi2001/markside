@@ -2,7 +2,9 @@ import * as crypto from 'crypto';
 import * as vscode from 'vscode';
 import { registerAssetSync } from './assets';
 import { DrawingServer, getDrawingDevice, usbAddresses } from './drawingServer';
+import { FontSizes } from './fontSizes';
 import { LiveEditorProvider, saveToNote } from './liveEditor';
+import { PdfEditorProvider } from './pdfEditor';
 
 export function activate(context: vscode.ExtensionContext): void {
   // Persisted so the URL bookmarked on the iPad stays valid.
@@ -18,10 +20,14 @@ export function activate(context: vscode.ExtensionContext): void {
     vscode.Uri.joinPath(context.globalStorageUri, 'sidecar-browser').fsPath,
     saveToNote,
   );
-  const provider = new LiveEditorProvider(context.extensionUri, drawingServer);
+  const fontSizes = new FontSizes(context.globalState);
+  const provider = new LiveEditorProvider(context.extensionUri, drawingServer, fontSizes);
 
   context.subscriptions.push(
     vscode.window.registerCustomEditorProvider(LiveEditorProvider.viewType, provider, {
+      webviewOptions: { retainContextWhenHidden: true },
+    }),
+    vscode.window.registerCustomEditorProvider(PdfEditorProvider.viewType, new PdfEditorProvider(context.extensionUri, drawingServer, fontSizes), {
       webviewOptions: { retainContextWhenHidden: true },
     }),
     vscode.commands.registerCommand('mdLive.open', (uri?: vscode.Uri) =>
@@ -35,7 +41,9 @@ export function activate(context: vscode.ExtensionContext): void {
     ),
     vscode.commands.registerCommand('mdLive.insertDrawing', () => provider.postToActivePanel('insertDrawing')),
     vscode.commands.registerCommand('mdLive.chooseTheme', chooseTheme),
-    vscode.commands.registerCommand('mdLive.chooseFontSize', chooseFontSize),
+    vscode.commands.registerCommand('mdLive.chooseFontSize', () => chooseFontSize(fontSizes)),
+    // Before the rename, so the reopened editor already finds the note's size.
+    vscode.workspace.onWillRenameFiles((e) => e.waitUntil(Promise.all(e.files.map((f) => fontSizes.rename(f.oldUri, f.newUri))))),
     vscode.commands.registerCommand('mdLive.chooseDrawingDevice', chooseDrawingDevice),
     // One variant per device, so the editor title shows the current device's icon.
     ...DEVICES.map((d) => vscode.commands.registerCommand(`mdLive.chooseDrawingDevice.${d.value}`, chooseDrawingDevice)),
@@ -101,7 +109,7 @@ function registerDeviceStatus(): vscode.Disposable[] {
   item.tooltip = 'Drawing device for handwriting (click to switch)';
   const update = (): void => {
     const input = vscode.window.tabGroups.activeTabGroup.activeTab?.input;
-    if (!(input instanceof vscode.TabInputCustom && input.viewType === LiveEditorProvider.viewType)) {
+    if (!(input instanceof vscode.TabInputCustom && [LiveEditorProvider.viewType, PdfEditorProvider.viewType].includes(input.viewType))) {
       item.hide();
       return;
     }
@@ -130,17 +138,27 @@ async function chooseTheme(): Promise<void> {
   }
 }
 
-async function chooseFontSize(): Promise<void> {
-  const config = vscode.workspace.getConfiguration('mdLive');
-  const current = config.get<number>('fontSize', 16);
-  const items = [8, 9, 10, 11, 12, 13, 14, 15, 16, 17, 18, 20, 22, 24].map((size) => ({
-    label: `${size} px`,
-    description: [size === 16 ? 'default' : '', size === current ? 'current' : ''].filter(Boolean).join(', '),
-    value: size,
-  }));
-  const picked = await vscode.window.showQuickPick(items, { placeHolder: `Font size of notes (current: ${current} px)` });
+// Sets the font size of the active note or PDF only; "Default" makes it follow mdLive.fontSize again.
+async function chooseFontSize(fontSizes: FontSizes): Promise<void> {
+  const input = vscode.window.tabGroups.activeTabGroup.activeTab?.input;
+  if (!(input instanceof vscode.TabInputCustom && [LiveEditorProvider.viewType, PdfEditorProvider.viewType].includes(input.viewType))) {
+    vscode.window.showWarningMessage('No Markdown Live Editor or PDF is active.');
+    return;
+  }
+  const own = fontSizes.own(input.uri);
+  const fallback = vscode.workspace.getConfiguration('mdLive').get<number>('fontSize', 16);
+  const items = [
+    { label: `Default (${fallback} px)`, description: own === undefined ? 'current' : 'setting mdLive.fontSize', value: undefined },
+    ...[8, 9, 10, 11, 12, 13, 14, 15, 16, 17, 18, 20, 22, 24].map((size) => ({
+      label: `${size} px`,
+      description: size === own ? 'current' : '',
+      value: size as number | undefined,
+    })),
+  ];
+  const name = decodeURIComponent(input.uri.path.split('/').pop()!);
+  const picked = await vscode.window.showQuickPick(items, { placeHolder: `Font size of ${name} (current: ${fontSizes.get(input.uri)} px)` });
   if (picked) {
-    await config.update('fontSize', picked.value, vscode.ConfigurationTarget.Global);
+    await fontSizes.set(input.uri, picked.value);
   }
 }
 

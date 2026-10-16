@@ -130,6 +130,12 @@ body[data-theme='dark'] {
   opacity: 0.4;
 }
 
+/* Crepe only hides its selection toolbar on the next selection change, so it would stay open after
+   clicking somewhere outside the editor. */
+.milkdown:not(:focus-within) .milkdown-toolbar {
+  display: none !important;
+}
+
 /* No block handle (+ and drag) left of blocks; the slash menu stays. */
 .milkdown .milkdown-block-handle {
   display: none;
