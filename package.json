@@ -102,13 +102,13 @@
       },
       {
         "command": "mdLive.toggleExplanations",
-        "title": "Hide Claude's Explanations",
+        "title": "Collapse Claude's Explanations",
         "category": "Markdown Live",
         "icon": "$(lightbulb)"
       },
       {
         "command": "mdLive.toggleExplanations.off",
-        "title": "Show Claude's Explanations",
+        "title": "Expand Claude's Explanations",
         "category": "Markdown Live",
         "icon": "$(lightbulb-empty)"
       },
@@ -186,12 +186,12 @@
         },
         {
           "command": "mdLive.toggleExplanations",
-          "when": "activeCustomEditorId == mdLive.pdf && config.mdLive.pdfExplanations",
+          "when": "activeCustomEditorId == mdLive.pdf && config.mdLive.pdfExplanations && config.mdLive.pdfExplanationsExpanded",
           "group": "navigation@2"
         },
         {
           "command": "mdLive.toggleExplanations.off",
-          "when": "activeCustomEditorId == mdLive.pdf && !config.mdLive.pdfExplanations",
+          "when": "activeCustomEditorId == mdLive.pdf && config.mdLive.pdfExplanations && !config.mdLive.pdfExplanationsExpanded",
           "group": "navigation@2"
         },
         {
@@ -304,6 +304,11 @@
           "type": "boolean",
           "default": true,
           "description": "Show Claude's explanations of the slides (paper.pdf.claude.md, written by the explain-slides skill) next to PDFs."
+        },
+        "mdLive.pdfExplanationsExpanded": {
+          "type": "boolean",
+          "default": false,
+          "description": "Show Claude's explanations of the slides expanded; otherwise only their key message (the lightbulb in the PDF editor title toggles this)."
         },
         "mdLive.drawingDevice": {
           "type": "string",

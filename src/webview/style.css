@@ -310,3 +310,9 @@ body[data-theme='dark'] {
   stroke-opacity: 0.45;
   stroke-width: 7px;
 }
+
+/* VS Code's default webview CSS gives blockquotes its own (theme) background and border. */
+.milkdown .ProseMirror blockquote {
+  background: none;
+  border: none;
+}

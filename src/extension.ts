@@ -25,7 +25,7 @@ export function activate(context: vscode.ExtensionContext): void {
   const pdfProvider = new PdfEditorProvider(context.extensionUri, drawingServer, fontSizes);
   const toggleExplanations = () => {
     const config = vscode.workspace.getConfiguration('mdLive');
-    return config.update('pdfExplanations', !config.get<boolean>('pdfExplanations', true), vscode.ConfigurationTarget.Global);
+    return config.update('pdfExplanationsExpanded', !config.get<boolean>('pdfExplanationsExpanded', false), vscode.ConfigurationTarget.Global);
   };
 
   context.subscriptions.push(

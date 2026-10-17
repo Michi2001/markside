@@ -367,6 +367,7 @@ export async function sendSelectionToClaude(
     t.input instanceof vscode.TabInputText && t.input.uri.toString() === document.uri.toString();
   const group = vscode.window.tabGroups.all.find((g) => g.viewColumn === column);
   const hadTextTab = group?.tabs.some(isOurTextTab) ?? false;
+  const original = group?.activeTab?.input;
 
   const editor = await vscode.window.showTextDocument(document, { viewColumn: column, preview: true });
   const sel = range ?? new vscode.Range(0, 0, 0, 0);
@@ -381,5 +382,11 @@ export async function sendSelectionToClaude(
       await vscode.window.tabGroups.close(tempTab, true);
     }
   }
-  panel.reveal(column, true);
+  // Closing the temporary tab activates the group's previous editor (e.g. another file), and
+  // panel.reveal doesn't reliably bring a custom editor back, so the original tab is reopened.
+  if (original instanceof vscode.TabInputCustom) {
+    await vscode.commands.executeCommand('vscode.openWith', original.uri, original.viewType, { viewColumn: column, preserveFocus: true });
+  } else {
+    panel.reveal(column, true);
+  }
 }

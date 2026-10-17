@@ -9,6 +9,7 @@ import { parseExplanations } from './sidecar';
 const CHUNK = 10;
 // Characters of each page's text sent along for choosing pages by topic.
 const PAGE_TEXT_LENGTH = 400;
+const OUTLINE_LENGTH = 150;
 
 // The state of a PDF view the explain command acts on.
 export type PdfView = {
@@ -84,16 +85,19 @@ export async function explainSlides(view: PdfView, onRunningChange: () => void):
   const next = (ahead.length > 0 ? ahead : open).slice(0, CHUNK);
   const pdfName = path.basename(view.pdf.fsPath);
   const fileName = path.basename(file.fsPath);
-  const pagesPrompt = (pages: number[]) =>
+  // The start of every page's text tells Claude what later slides cover, so it doesn't explain it early.
+  const pagesPrompt = async (pages: number[]) =>
     `Use the explain-slides skill: explain pages ${pages.join(', ')} of "${pdfName}" and add them to "${fileName}" ` +
-    'in ascending page order; keep everything already in that file unchanged.';
+    'in ascending page order; keep everything already in that file unchanged.\n\n' +
+    'Outline of the whole lecture (start of every page\'s text), to see what later slides cover:\n\n' +
+    (await view.pageTexts()).map((t, i) => `--- Page ${i + 1} ---\n${t.slice(0, OUTLINE_LENGTH)}`).join('\n\n');
 
   const choices: Choice[] = [];
   if (next.length > 0) {
     choices.push({
       label: `$(sparkle) Explain slides ${formatPages(next)}`,
       description: `next ${next.length} unexplained`,
-      run: async () => pagesPrompt(next),
+      run: () => pagesPrompt(next),
     });
   }
   choices.push({
@@ -104,7 +108,7 @@ export async function explainSlides(view: PdfView, onRunningChange: () => void):
       if (input !== undefined && !pages?.length) {
         vscode.window.showWarningMessage(`"${input}" is not a page range like 5-12, 20.`);
       }
-      return pages?.length ? pagesPrompt(pages) : undefined;
+      return pages?.length ? await pagesPrompt(pages) : undefined;
     },
   });
   choices.push({
@@ -126,7 +130,7 @@ export async function explainSlides(view: PdfView, onRunningChange: () => void):
     },
   });
   if (open.length > next.length) {
-    choices.push({ label: '$(files) Explain all unexplained slides', description: `${open.length} slides`, run: async () => pagesPrompt(open) });
+    choices.push({ label: '$(files) Explain all unexplained slides', description: `${open.length} slides`, run: () => pagesPrompt(open) });
   }
 
   const choice = await vscode.window.showQuickPick(choices, { placeHolder: `Claude explains slides of ${pdfName}` });

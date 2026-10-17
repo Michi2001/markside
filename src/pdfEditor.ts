@@ -11,8 +11,8 @@ import {
   type Rect,
   type Section,
   addNote,
+  clearExplanation,
   deleteNote,
-  deleteSection,
   formatAnchor,
   pageKey,
   parseExplanations,
@@ -30,18 +30,18 @@ type WebviewMessage =
   | { type: 'folds'; folds: Record<string, Fold[]> }
   | { type: 'saveImage'; id: number; name: string; mime: string; data: string }
   | { type: 'selection'; text: string }
-  | { type: 'askClaude'; page: number; quote?: string; rects?: Rect[]; key?: string; note?: boolean }
+  | { type: 'askClaude'; page: number; quote?: string; rects?: Rect[]; key?: string; note?: boolean; explanation?: boolean }
   | { type: 'view'; page: number; pages: number }
   | { type: 'pageTexts'; texts: string[] }
-  | { type: 'deleteExplanation'; key: string }
-  | { type: 'adoptExplanation'; key: string; rects: Rect[] | null; color: string }
+  | { type: 'deleteExplanation'; page: number }
   | { type: 'drawRemote'; id: number; drawing: unknown; src: string | null };
 
 const SAVE_DELAY_MS = 800;
 
 type NoteData = { anchor: Anchor; label: string; body: string };
-// One undoable step: notes added and removed together (a new mark replacing others, a deletion).
-type Step = { added: NoteData[]; removed: NoteData[] };
+// One undoable step: notes added and removed together (a new mark replacing others, a deletion),
+// or a dismissed explanation (the explanations file before and after).
+type Step = { added: NoteData[]; removed: NoteData[]; explanations?: { before: string; after: string } };
 
 const noteData = (s: Section): NoteData => ({ anchor: s.anchor!, label: s.label, body: s.body });
 
@@ -124,8 +124,10 @@ export class PdfEditorProvider implements vscode.CustomReadonlyEditorProvider {
         return { ...s, body: e && e.stored === s.body ? e.webview : s.body };
       });
 
-    const sendNotes = (): void => {
-      panel.webview.postMessage({ type: 'notes', sections: sections() });
+    // `reset`: notes changed by undo; their cards take the new body
+    // even if they sent it themselves before (it is no late echo then).
+    const sendNotes = (reset: string[] = []): void => {
+      panel.webview.postMessage({ type: 'notes', sections: sections(), reset });
     };
 
     const scheduleSave = (): void => {
@@ -189,8 +191,8 @@ export class PdfEditorProvider implements vscode.CustomReadonlyEditorProvider {
       if (e.affectsConfiguration('mdLive.theme')) {
         panel.webview.postMessage({ type: 'theme', theme: getTheme() });
       }
-      if (e.affectsConfiguration('mdLive.pdfExplanations')) {
-        panel.webview.postMessage({ type: 'showExplanations', show: getShowExplanations() });
+      if (e.affectsConfiguration('mdLive.pdfExplanations') || e.affectsConfiguration('mdLive.pdfExplanationsExpanded')) {
+        panel.webview.postMessage({ type: 'showExplanations', show: getShowExplanations(), expand: getExpandExplanations() });
       }
       if (e.affectsConfiguration('mdLive.pdfNotesWidth')) {
         panel.webview.postMessage({ type: 'notesWidth', width: getNotesWidth() });
@@ -244,6 +246,7 @@ export class PdfEditorProvider implements vscode.CustomReadonlyEditorProvider {
             sections: sections(),
             explanations: parseExplanations((await readExplanations()) ?? ''),
             showExplanations: getShowExplanations(),
+            expandExplanations: getExpandExplanations(),
             folds: await loadFolds(notes, {}),
           });
           break;
@@ -308,9 +311,19 @@ export class PdfEditorProvider implements vscode.CustomReadonlyEditorProvider {
               const rest = remove.map((n) => formatAnchor(n.anchor)).reduce(deleteNote, text);
               return add.reduce((t, n) => addNote(t, n.anchor, n.label, n.body), rest);
             });
-            [...remove, ...add].forEach((n) => echo.delete(formatAnchor(n.anchor)));
+            if (step.explanations) {
+              const [from, to] = msg.redo ? [step.explanations.before, step.explanations.after] : [step.explanations.after, step.explanations.before];
+              // Claude may have written the file since; then restoring the old text would drop that.
+              if (((await readExplanations()) ?? '') === from) {
+                await vscode.workspace.fs.writeFile(explanations, Buffer.from(to));
+              } else {
+                vscode.window.showWarningMessage('The explanations file changed meanwhile; the explanation was not restored.');
+              }
+            }
+            const changed = [...remove, ...add].map((n) => formatAnchor(n.anchor));
+            changed.forEach((key) => echo.delete(key));
             (msg.redo ? undoStack : redoStack).push(step);
-            sendNotes();
+            sendNotes(changed);
           });
           break;
         case 'view':
@@ -324,35 +337,12 @@ export class PdfEditorProvider implements vscode.CustomReadonlyEditorProvider {
         case 'deleteExplanation':
           queue(async () => {
             const text = (await readExplanations()) ?? '';
-            const section = parseExplanations(text).find((s) => s.key === msg.key);
-            if (section) {
-              await vscode.workspace.fs.writeFile(explanations, Buffer.from(deleteSection(text, section)));
+            const after = clearExplanation(text, msg.page);
+            if (after !== text) {
+              undoStack.push({ added: [], removed: [], explanations: { before: text, after } });
+              redoStack.length = 0;
+              await vscode.workspace.fs.writeFile(explanations, Buffer.from(after));
             }
-          });
-          break;
-        case 'adoptExplanation':
-          // Moves an explanation into the own notes: a term found on the page becomes a text note on
-          // it, anything else goes to the end of the page note.
-          queue(async () => {
-            const text = (await readExplanations()) ?? '';
-            const section = parseExplanations(text).find((s) => s.key === msg.key);
-            if (!section) {
-              return;
-            }
-            await write((notesText) => {
-              if (section.anchor && msg.rects) {
-                const anchor = { page: section.page, rects: msg.rects, area: false, color: msg.color };
-                undoStack.push({ added: [{ anchor, label: section.label, body: section.body }], removed: [] });
-                redoStack.length = 0;
-                return addNote(notesText, anchor, section.label, section.body);
-              }
-              const key = pageKey(section.page);
-              const old = parseSections(notesText).find((s) => s.key === key)?.body ?? '';
-              const body = section.anchor ? `**${section.label}:** ${section.body}` : section.body;
-              return setNoteBody(notesText, key, old ? `${old}\n\n${body}` : body);
-            });
-            sendNotes();
-            await vscode.workspace.fs.writeFile(explanations, Buffer.from(deleteSection(text, section)));
           });
           break;
         case 'folds':
@@ -430,7 +420,7 @@ function claudeContext(
   pdf: vscode.Uri,
   notesText: string | undefined,
   explanationsText: string | undefined,
-  { page, quote, rects, key, note }: { page: number; quote?: string; rects?: Rect[]; key?: string; note?: boolean },
+  { page, quote, rects, key, note, explanation }: { page: number; quote?: string; rects?: Rect[]; key?: string; note?: boolean; explanation?: boolean },
 ): string {
   const rel = (uri: vscode.Uri) => vscode.workspace.asRelativePath(uri, false);
   const sections = parseSections(notesText ?? '').filter((s) => s.page === page && (s.anchor || s.body.trim()));
@@ -447,7 +437,17 @@ function claudeContext(
   }
   // The position tells apart passages that occur more than once on the page.
   const anchor = rects ? formatAnchor({ page, rects, area: false, color: 'yellow' }) : mark?.key;
-  const passage = quote ?? (mark?.anchor?.area ? undefined : mark?.label);
+  if (explanation) {
+    lines.push(
+      '',
+      '## Your explanation in question',
+      '',
+      quote
+        ? `The question is about this passage of your explanation of page ${page} (full explanation below):\n\n> ${quote}`
+        : `The question is about your explanation of page ${page} (below).`,
+    );
+  }
+  const passage = explanation ? undefined : (quote ?? (mark?.anchor?.area ? undefined : mark?.label));
   if (passage) {
     lines.push('', '## Marked passage', '', `> ${passage}`, '', `Position: \`#${anchor}\``);
   }
@@ -491,6 +491,10 @@ function fenced(text: string): string {
 
 function getShowExplanations(): boolean {
   return vscode.workspace.getConfiguration('mdLive').get<boolean>('pdfExplanations', true);
+}
+
+function getExpandExplanations(): boolean {
+  return vscode.workspace.getConfiguration('mdLive').get<boolean>('pdfExplanationsExpanded', false);
 }
 
 async function readText(uri: vscode.Uri): Promise<string> {

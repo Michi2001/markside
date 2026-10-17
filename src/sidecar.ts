@@ -200,3 +200,22 @@ export function deleteSection(text: string, s: Section): string {
   }
   return text;
 }
+
+// Claude's explanation of a page as one Markdown text. Older files explain terms in own
+// `### [term](#pN)` sections; they become bullets below the page's text.
+export function pageExplanation(sections: Section[], page: number): string {
+  const own = sections.filter((s) => s.page === page);
+  const body = own.find((s) => !s.anchor)?.body.trim() ?? '';
+  const terms = own.filter((s) => s.anchor && s.body.trim()).map((s) => `- **${s.label}:** ${s.body.trim().replace(/\s*\n\s*/g, ' ')}`);
+  return [body, terms.join('\n')].filter(Boolean).join('\n\n');
+}
+
+// Removes a page's explanation but keeps its empty heading, so the page still counts as explained.
+export function clearExplanation(text: string, page: number): string {
+  const own = parseSections(text).filter((s) => s.page === page);
+  if (own.length === 0) {
+    return text;
+  }
+  const tail = text.slice(Math.max(...own.map((s) => s.end)));
+  return text.slice(0, Math.min(...own.map((s) => s.start))) + `## Page ${page}\n` + (tail ? `\n${tail}` : '');
+}
