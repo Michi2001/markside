@@ -3,7 +3,7 @@ import * as os from 'os';
 import * as path from 'path';
 import * as vscode from 'vscode';
 import { explanationsUri } from './assets';
-import { parseExplanations } from './sidecar';
+import { type Divider, parseExplanations } from './sidecar';
 
 // Slides explained per run by default.
 const CHUNK = 10;
@@ -18,6 +18,10 @@ export type PdfView = {
   page: number;
   pages: number;
   pageTexts: () => Promise<string[]>;
+  dividers: () => Divider[];
+  // Asks for date/title of the divider after a page (new or existing) and scrolls to one.
+  editDivider: (after: number) => Promise<void>;
+  reveal: (after: number) => void;
 };
 
 const running = new Map<string, ChildProcess>();
@@ -93,6 +97,20 @@ export async function explainSlides(view: PdfView, onRunningChange: () => void):
     (await view.pageTexts()).map((t, i) => `--- Page ${i + 1} ---\n${t.slice(0, OUTLINE_LENGTH)}`).join('\n\n');
 
   const choices: Choice[] = [];
+  // From the last lecture end to the next divider (or the end of the deck).
+  const dividers = view.dividers();
+  const lastLecture = dividers.filter((d) => d.date).at(-1);
+  if (lastLecture) {
+    const end = dividers.find((d) => d.after > lastLecture.after)?.after ?? view.pages;
+    const lecture = open.filter((p) => p > lastLecture.after && p <= end);
+    if (lecture.length > 0) {
+      choices.push({
+        label: `$(mortar-board) Explain the next lecture: slides ${formatPages(lecture)}`,
+        description: `after ${lastLecture.date}, ${lecture.length} unexplained`,
+        run: () => pagesPrompt(lecture),
+      });
+    }
+  }
   if (next.length > 0) {
     choices.push({
       label: `$(sparkle) Explain slides ${formatPages(next)}`,

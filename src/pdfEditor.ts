@@ -8,6 +8,7 @@ import { applyAdopted, applyMinimalEdit, getTheme, queueEdit, sendSelectionToCla
 import { preserveSource } from './preserve';
 import {
   type Anchor,
+  type Divider,
   type Rect,
   type Section,
   addNote,
@@ -15,8 +16,10 @@ import {
   deleteNote,
   formatAnchor,
   pageKey,
+  parseDividers,
   parseExplanations,
   parseSections,
+  setDividers,
   setNoteBody,
 } from './sidecar';
 import type { Fold } from './webview/fold';
@@ -34,14 +37,21 @@ type WebviewMessage =
   | { type: 'view'; page: number; pages: number }
   | { type: 'pageTexts'; texts: string[] }
   | { type: 'deleteExplanation'; page: number }
+  | { type: 'editDivider'; after: number }
+  | { type: 'deleteDivider'; after: number }
   | { type: 'drawRemote'; id: number; drawing: unknown; src: string | null };
 
 const SAVE_DELAY_MS = 800;
 
 type NoteData = { anchor: Anchor; label: string; body: string };
 // One undoable step: notes added and removed together (a new mark replacing others, a deletion),
-// or a dismissed explanation (the explanations file before and after).
-type Step = { added: NoteData[]; removed: NoteData[]; explanations?: { before: string; after: string } };
+// a dismissed explanation (the explanations file before and after) or changed dividers.
+type Step = {
+  added: NoteData[];
+  removed: NoteData[];
+  explanations?: { before: string; after: string };
+  dividers?: { before: Divider[]; after: Divider[] };
+};
 
 const noteData = (s: Section): NoteData => ({ anchor: s.anchor!, label: s.label, body: s.body });
 
@@ -58,6 +68,30 @@ export class PdfEditorProvider implements vscode.CustomReadonlyEditorProvider {
     private readonly drawingServer: DrawingServer,
     private readonly fontSizes: FontSizes,
   ) {}
+
+  // Quick pick: add a divider after the page in view or jump to one.
+  async dividers(): Promise<void> {
+    const view = this.active;
+    if (!view) {
+      vscode.window.showWarningMessage('No PDF is active.');
+      return;
+    }
+    type Item = vscode.QuickPickItem & { after: number; add?: boolean };
+    const items: Item[] = [
+      { label: `$(add) Add divider after page ${view.page}`, after: view.page, add: true },
+      ...view.dividers().map((d) => ({
+        label: `${d.date ? '$(mortar-board)' : '$(list-tree)'} ${[d.date, d.title].filter(Boolean).join(' · ')}`,
+        description: `after page ${d.after}`,
+        after: d.after,
+      })),
+    ];
+    const item = await vscode.window.showQuickPick(items, { placeHolder: 'Lecture ends and sections' });
+    if (item?.add) {
+      await view.editDivider(item.after);
+    } else if (item) {
+      view.reveal(item.after);
+    }
+  }
 
   explainSlides(): void {
     if (!this.active) {
@@ -127,7 +161,7 @@ export class PdfEditorProvider implements vscode.CustomReadonlyEditorProvider {
     // `reset`: notes changed by undo; their cards take the new body
     // even if they sent it themselves before (it is no late echo then).
     const sendNotes = (reset: string[] = []): void => {
-      panel.webview.postMessage({ type: 'notes', sections: sections(), reset });
+      panel.webview.postMessage({ type: 'notes', sections: sections(), dividers: parseDividers(note?.getText() ?? ''), reset });
     };
 
     const scheduleSave = (): void => {
@@ -155,6 +189,18 @@ export class PdfEditorProvider implements vscode.CustomReadonlyEditorProvider {
       }
     });
 
+    const changeDividers = (change: (list: Divider[]) => Divider[]): void =>
+      queue(async () => {
+        await write((text) => {
+          const before = parseDividers(text);
+          const after = change(before);
+          undoStack.push({ added: [], removed: [], dividers: { before, after } });
+          redoStack.length = 0;
+          return setDividers(text, after);
+        });
+        sendNotes();
+      });
+
     let resolveTexts: ((texts: string[]) => void) | undefined;
     const view: PdfView = {
       pdf,
@@ -165,6 +211,27 @@ export class PdfEditorProvider implements vscode.CustomReadonlyEditorProvider {
           resolveTexts = resolve;
           panel.webview.postMessage({ type: 'requestPageTexts' });
         }),
+      dividers: () => parseDividers(note?.getText() ?? ''),
+      editDivider: async (after) => {
+        const current = view.dividers().find((d) => d.after === after);
+        const value = current ? [current.date, current.title].filter(Boolean).join(' ') : `${today()} `;
+        const input = await vscode.window.showInputBox({
+          title: `${current ? 'Divider' : 'New divider'} after page ${after}`,
+          prompt: 'Date = end of a lecture, title alone = start of an own section; empty removes the divider',
+          placeHolder: 'e.g. 2026-10-14 Introduction, or Bayesian uncertainty',
+          value,
+          valueSelection: current ? undefined : [value.length, value.length],
+        });
+        if (input === undefined || (!current && !input.trim())) {
+          return;
+        }
+        const [, date, title] = /^(\d{4}-\d{2}-\d{2})?\s*(.*)$/.exec(input.trim())!;
+        changeDividers((list) => [...list.filter((d) => d.after !== after), ...(input.trim() ? [{ after, date, title }] : [])]);
+      },
+      reveal: (after) => {
+        panel.reveal();
+        panel.webview.postMessage({ type: 'revealDivider', after });
+      },
     };
     if (panel.active) {
       this.active = view;
@@ -244,6 +311,7 @@ export class PdfEditorProvider implements vscode.CustomReadonlyEditorProvider {
             notesWidth: getNotesWidth(),
             drawingDevice: getDrawingDevice(),
             sections: sections(),
+            dividers: parseDividers(note?.getText() ?? ''),
             explanations: parseExplanations((await readExplanations()) ?? ''),
             showExplanations: getShowExplanations(),
             expandExplanations: getExpandExplanations(),
@@ -309,7 +377,8 @@ export class PdfEditorProvider implements vscode.CustomReadonlyEditorProvider {
                 }
               }
               const rest = remove.map((n) => formatAnchor(n.anchor)).reduce(deleteNote, text);
-              return add.reduce((t, n) => addNote(t, n.anchor, n.label, n.body), rest);
+              const result = add.reduce((t, n) => addNote(t, n.anchor, n.label, n.body), rest);
+              return step.dividers ? setDividers(result, msg.redo ? step.dividers.after : step.dividers.before) : result;
             });
             if (step.explanations) {
               const [from, to] = msg.redo ? [step.explanations.before, step.explanations.after] : [step.explanations.after, step.explanations.before];
@@ -344,6 +413,12 @@ export class PdfEditorProvider implements vscode.CustomReadonlyEditorProvider {
               await vscode.workspace.fs.writeFile(explanations, Buffer.from(after));
             }
           });
+          break;
+        case 'editDivider':
+          await view.editDivider(msg.after);
+          break;
+        case 'deleteDivider':
+          changeDividers((list) => list.filter((d) => d.after !== msg.after));
           break;
         case 'folds':
           queue(() => saveFolds(notes, msg.folds));
@@ -487,6 +562,12 @@ function fenced(text: string): string {
   const longest = Math.max(2, ...(text.match(/`+/g) ?? []).map((m) => m.length));
   const fence = '`'.repeat(longest + 1);
   return `${fence}markdown\n${text}\n${fence}`;
+}
+
+// Local date as YYYY-MM-DD.
+function today(): string {
+  const d = new Date();
+  return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`;
 }
 
 function getShowExplanations(): boolean {

@@ -219,3 +219,59 @@ export function clearExplanation(text: string, page: number): string {
   const tail = text.slice(Math.max(...own.map((s) => s.end)));
   return text.slice(0, Math.min(...own.map((s) => s.start))) + `## Page ${page}\n` + (tail ? `\n${tail}` : '');
 }
+
+// Dividers between pages (lecture ends, own sections) as a list before the first page:
+//
+//   ## Sections
+//
+//   - After page 23 · 2026-10-14 · Introduction   ← lecture end (dated), optional title
+//   - After page 30 · Bayesian uncertainty        ← own section starting on page 31
+export type Divider = { after: number; date?: string; title: string };
+
+const DIVIDERS_HEADING = '## Sections';
+const DIVIDER = /^- After page (\d+)(?: · (\d{4}-\d{2}-\d{2}))?(?: · (.*?))?[ \t]*$/;
+
+export function formatDivider({ after, date, title }: Divider): string {
+  return [`- After page ${after}`, date, title].filter(Boolean).join(' · ');
+}
+
+// The `## Sections` block in the text before the first page, with the dividers it lists.
+function dividersBlock(text: string): { start: number; end: number; dividers: Divider[] } | undefined {
+  const preamble = text.slice(0, parseSections(text)[0]?.start ?? text.length);
+  let offset = 0;
+  let block: { start: number; end: number; dividers: Divider[] } | undefined;
+  for (const line of preamble.split('\n')) {
+    const start = offset;
+    offset += line.length + 1;
+    const clean = line.replace(/\r$/, '');
+    if (!block) {
+      if (clean.trim() === DIVIDERS_HEADING) {
+        block = { start, end: start + line.length, dividers: [] };
+      }
+      continue;
+    }
+    const match = DIVIDER.exec(clean);
+    if (match) {
+      block.dividers.push({ after: Number(match[1]), date: match[2], title: match[3] ?? '' });
+      block.end = start + line.length;
+    } else if (clean.trim()) {
+      break;
+    }
+  }
+  return block;
+}
+
+export function parseDividers(text: string): Divider[] {
+  return dividersBlock(text)?.dividers ?? [];
+}
+
+// Rewrites the `## Sections` block (at the top of the file if there is none); no dividers → no block.
+export function setDividers(text: string, dividers: Divider[]): string {
+  const block = dividersBlock(text) ?? { start: 0, end: 0 };
+  const list = [...dividers].sort((a, b) => a.after - b.after).map(formatDivider);
+  const head = text.slice(0, block.start).trimEnd();
+  const tail = text.slice(block.end).replace(/^\s+/, '');
+  const content = list.length > 0 ? `${DIVIDERS_HEADING}\n\n${list.join('\n')}` : '';
+  const result = [head, content, tail].filter(Boolean).join('\n\n');
+  return tail ? result : result && result + '\n';
+}

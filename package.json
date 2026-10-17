@@ -113,6 +113,12 @@
         "icon": "$(lightbulb-empty)"
       },
       {
+        "command": "mdLive.dividers",
+        "title": "Lecture Ends and Sections…",
+        "category": "Markdown Live",
+        "icon": "$(milestone)"
+      },
+      {
         "command": "mdLive.explainSlides",
         "title": "Explain Slides with Claude…",
         "category": "Markdown Live",
@@ -173,6 +179,11 @@
           "command": "mdLive.chooseDrawingDevice.sidecar",
           "when": "(activeCustomEditorId == mdLive.editor || activeCustomEditorId == mdLive.pdf) && config.mdLive.drawingDevice == sidecar",
           "group": "navigation@3"
+        },
+        {
+          "command": "mdLive.dividers",
+          "when": "activeCustomEditorId == mdLive.pdf",
+          "group": "navigation@2"
         },
         {
           "command": "mdLive.explainSlides",
@@ -249,6 +260,10 @@
         {
           "command": "mdLive.toggleExplanations.off",
           "when": "false"
+        },
+        {
+          "command": "mdLive.dividers",
+          "when": "activeCustomEditorId == mdLive.pdf"
         },
         {
           "command": "mdLive.explainSlides",

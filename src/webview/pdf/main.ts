@@ -2,7 +2,7 @@ import { Selection } from '@milkdown/kit/prose/state';
 import type { EditorView } from '@milkdown/kit/prose/view';
 import * as pdfjs from 'pdfjs-dist';
 import type { PDFPageProxy, RenderTask } from 'pdfjs-dist';
-import { type Anchor, type Rect, type Section, formatAnchor, pageExplanation, pageKey } from '../../sidecar';
+import { type Anchor, type Divider, type Rect, type Section, formatAnchor, pageExplanation, pageKey } from '../../sidecar';
 import { isDrawingOpen } from '../drawing';
 import { type Fold, foldPlugin, getFolds, setFolds, toggleFold } from '../fold';
 import { applyInit, handleHostMessage, post, saveFile } from '../host';
@@ -102,6 +102,8 @@ type PageView = {
   marks: HTMLElement;
   margin: HTMLElement;
   lines: SVGSVGElement;
+  // Band below the row: divider after this page (lecture end / own section), else a "+" on hover.
+  divider: HTMLElement;
   renderedScale: number;
   task?: RenderTask;
   ink?: Grid;
@@ -116,6 +118,8 @@ let notesWidth = 360;
 let distUri = '';
 // Sections received before the pages exist.
 let latestSections: Section[] = [];
+// Lecture ends and own sections (`## Sections` in the notes file).
+let dividers: Divider[] = [];
 // Card to focus once the extension has added its note.
 let pendingFocus: string | undefined;
 // Collapsed list items/headings per card (`foo.pdf.assets/.folds.json`).
@@ -290,7 +294,13 @@ function createPageView(page: PDFPageProxy): PageView {
   const lines = document.createElementNS('http://www.w3.org/2000/svg', 'svg');
   lines.classList.add('lines');
   row.append(lines);
-  return { num: page.pageNumber, page, width, height, row, pageEl, marks, margin, lines, renderedScale: 0 };
+  const divider = el('div', 'divider', row);
+  divider.addEventListener('mousedown', (e) => e.preventDefault());
+  divider.addEventListener('click', (e) => {
+    const del = (e.target as Element).closest('.divider-del');
+    post(del ? { type: 'deleteDivider', after: page.pageNumber } : { type: 'editDivider', after: page.pageNumber });
+  });
+  return { num: page.pageNumber, page, width, height, row, pageEl, marks, margin, lines, divider, renderedScale: 0 };
 }
 
 function applyScale(): void {
@@ -327,6 +337,7 @@ async function loadPdf(url: string): Promise<void> {
   pages.forEach(sizePage);
   applySections(latestSections);
   applyExplanations(explanations);
+  applyDividers(dividers);
   pages.forEach((pv) => pageObserver.observe(pv.row));
   reportView();
 }
@@ -1147,6 +1158,46 @@ function startArea(pv: PageView, e: MouseEvent): void {
   window.addEventListener('mouseup', up);
 }
 
+// ---------- Dividers ----------
+
+// A dated divider ends a lecture (red line), one with a title only starts an own section.
+function applyDividers(list: Divider[]): void {
+  dividers = list;
+  for (const pv of pages) {
+    const d = list.find((d) => d.after === pv.num);
+    pv.row.classList.toggle('divided', !!d);
+    pv.divider.classList.toggle('lecture', !!d?.date);
+    pv.divider.replaceChildren();
+    if (!d) {
+      el('span', 'divider-add', pv.divider).textContent = '+';
+      pv.divider.title = 'Add a lecture end or section here';
+      continue;
+    }
+    const label = el('span', 'divider-label', pv.divider);
+    if (d.date) {
+      const [y, m, day] = d.date.split('-').map(Number);
+      el('span', 'divider-date', label).textContent = new Date(y, m - 1, day).toLocaleDateString(undefined, {
+        weekday: 'short',
+        day: 'numeric',
+        month: 'short',
+        year: 'numeric',
+      });
+    }
+    if (d.title) {
+      el('span', 'divider-title', label).textContent = d.title;
+    }
+    el('span', 'divider-del', pv.divider).textContent = '×';
+    pv.divider.title = d.date ? `Lecture end after page ${pv.num} (click to edit)` : `Section starting on page ${pv.num + 1} (click to edit)`;
+  }
+}
+
+function revealDivider(after: number): void {
+  const pv = pageView(after);
+  if (pv) {
+    window.scrollTo(0, pv.row.offsetTop + pv.row.offsetHeight);
+  }
+}
+
 // ---------- Claude ----------
 
 // The page taking up most of the window.
@@ -1473,6 +1524,7 @@ window.addEventListener('message', async (event) => {
       distUri = msg.distUri;
       notesWidth = msg.notesWidth;
       latestSections = msg.sections;
+      dividers = msg.dividers;
       explanations = msg.explanations;
       showExplanations = msg.showExplanations;
       expandExplanations = msg.expandExplanations;
@@ -1481,6 +1533,10 @@ window.addEventListener('message', async (event) => {
       break;
     case 'notes':
       applySections(msg.sections, msg.reset);
+      applyDividers(msg.dividers);
+      break;
+    case 'revealDivider':
+      revealDivider(msg.after);
       break;
     case 'requestPageTexts':
       post({ type: 'pageTexts', texts: await allPageTexts() });

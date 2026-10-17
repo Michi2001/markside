@@ -568,3 +568,119 @@ body.alt .page .textLayer span {
 }
 
 
+
+/* ---------- Dividers (lecture ends, own sections) ---------- */
+
+/* Sits in the gap below its row: a "+" on hover where there is none, else a line with its label. */
+.divider {
+  position: absolute;
+  left: 0;
+  right: 0;
+  top: 100%;
+  height: 24px;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  cursor: pointer;
+  --divider-color: var(--vscode-foreground);
+  color: var(--divider-color);
+  font-family: var(--vscode-font-family);
+  font-size: 12px;
+}
+
+.divider::before {
+  content: '';
+  position: absolute;
+  left: 0;
+  right: 0;
+  top: 50%;
+  border-top: 2px solid var(--divider-color);
+  opacity: 0.55;
+}
+
+.row:not(.divided) .divider {
+  opacity: 0;
+  --divider-color: var(--vscode-descriptionForeground);
+}
+
+.row:not(.divided) .divider::before {
+  border-top-style: dashed;
+  border-top-width: 1px;
+}
+
+.row:not(.divided) .divider:hover {
+  opacity: 1;
+}
+
+.row.divided {
+  margin-bottom: 56px;
+}
+
+.row.divided .divider {
+  height: 56px;
+}
+
+.divider.lecture {
+  --divider-color: var(--line-red);
+}
+
+.divider.lecture::before {
+  opacity: 1;
+}
+
+.divider-add,
+.divider-label,
+.divider-del {
+  position: relative;
+  background: var(--vscode-editor-background);
+}
+
+.divider-add {
+  margin-left: 12px;
+  width: 18px;
+  height: 18px;
+  line-height: 17px;
+  text-align: center;
+  border-radius: 50%;
+  border: 1px solid var(--divider-color);
+}
+
+.divider-label {
+  display: flex;
+  gap: 8px;
+  align-items: baseline;
+  margin-left: 12px;
+  padding: 2px 10px;
+  border-radius: 10px;
+  border: 1px solid var(--divider-color);
+}
+
+.divider-date {
+  font-weight: 600;
+}
+
+.divider-title {
+  font-weight: 600;
+  color: var(--vscode-foreground);
+}
+
+.divider.lecture .divider-title {
+  font-weight: normal;
+}
+
+.divider-del {
+  margin-left: auto;
+  margin-right: 4px;
+  padding: 0 6px;
+  border-radius: 4px;
+  opacity: 0;
+  color: var(--vscode-descriptionForeground);
+}
+
+.divider:hover .divider-del {
+  opacity: 1;
+}
+
+.divider-del:hover {
+  color: var(--vscode-foreground);
+}

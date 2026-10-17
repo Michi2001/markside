@@ -51,6 +51,7 @@ export function activate(context: vscode.ExtensionContext): void {
     // Two variants each, so the editor title shows the state (shown/hidden, running).
     vscode.commands.registerCommand('mdLive.toggleExplanations', toggleExplanations),
     vscode.commands.registerCommand('mdLive.toggleExplanations.off', toggleExplanations),
+    vscode.commands.registerCommand('mdLive.dividers', () => pdfProvider.dividers()),
     vscode.commands.registerCommand('mdLive.explainSlides', () => pdfProvider.explainSlides()),
     vscode.commands.registerCommand('mdLive.explainSlides.running', () => pdfProvider.explainSlides()),
     vscode.commands.registerCommand('mdLive.chooseFontSize', () => chooseFontSize(fontSizes)),
