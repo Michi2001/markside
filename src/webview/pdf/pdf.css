@@ -422,11 +422,6 @@ body.alt .page .textLayer span {
   display: none;
 }
 
-/* Claude's read-only text is never edited. */
-.claude-body .milkdown .ProseMirror > p:last-child:not(:first-child):has(> br:only-child) {
-  display: none;
-}
-
 /* Below an explanation, the own note gets room to click into. */
 .card.has-claude > .card-body,
 .card.has-claude > .card-body .ProseMirror {
@@ -523,6 +518,36 @@ body.alt .page .textLayer span {
 .claude-summary {
   flex: 1;
   min-width: 0;
+}
+
+/* Expanded, the key message is the first paragraph of the editor: the head lies over the editor's
+   first line (sparkle left of it, chevron and × right of it) instead of taking a line of its own. */
+.claude {
+  position: relative;
+}
+
+.claude.open .claude-summary {
+  visibility: hidden;
+  height: 0;
+}
+
+.claude.open .claude-head {
+  position: absolute;
+  inset: 0 0 auto 0;
+  z-index: 1;
+  pointer-events: none;
+}
+
+.claude.open .claude-head > * {
+  pointer-events: auto;
+}
+
+.claude.open .claude-body:has(.milkdown) {
+  padding-top: 4px;
+}
+
+.claude.open .claude-body .ProseMirror > :first-child {
+  padding-right: 44px;
 }
 
 .claude-chevron {

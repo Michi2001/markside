@@ -38,7 +38,7 @@ type WebviewMessage =
   | { type: 'view'; page: number; pages: number }
   | { type: 'pageTexts'; texts: string[] }
   | { type: 'deleteExplanation'; page: number }
-  | { type: 'markExplanation'; page: number; text: string }
+  | { type: 'editExplanation'; page: number; text: string; undoable: boolean }
   | { type: 'editDivider'; after: number }
   | { type: 'deleteDivider'; after: number }
   | { type: 'drawRemote'; id: number; drawing: unknown; src: string | null };
@@ -248,8 +248,21 @@ export class PdfEditorProvider implements vscode.CustomReadonlyEditorProvider {
 
     // Claude writes the explanations file directly on disk.
     const readExplanations = async (): Promise<string | undefined> => ((await exists(explanations)) ? readText(explanations) : undefined);
+    // Per page: the explanation as stored after the webview's last edit and as the webview sent it,
+    // so the file's own formatting doesn't reset the editor.
+    const explanationEcho = new Map<number, { stored: string; webview: string }>();
+    const ownExplanations = (sections: Section[]): Record<number, string> => {
+      const own: Record<number, string> = {};
+      for (const [page, e] of explanationEcho) {
+        if (pageExplanation(sections, page) === e.stored) {
+          own[page] = e.webview;
+        }
+      }
+      return own;
+    };
     const sendExplanations = async (): Promise<void> => {
-      panel.webview.postMessage({ type: 'explanations', sections: parseExplanations((await readExplanations()) ?? '') });
+      const sections = parseExplanations((await readExplanations()) ?? '');
+      panel.webview.postMessage({ type: 'explanations', sections, own: ownExplanations(sections) });
     };
     const watcher = vscode.workspace.createFileSystemWatcher(new vscode.RelativePattern(docDir, path.basename(explanations.path)));
     watcher.onDidCreate(sendExplanations);
@@ -315,6 +328,7 @@ export class PdfEditorProvider implements vscode.CustomReadonlyEditorProvider {
             sections: sections(),
             dividers: parseDividers(note?.getText() ?? ''),
             explanations: parseExplanations((await readExplanations()) ?? ''),
+            ownExplanations: {},
             showExplanations: getShowExplanations(),
             expandExplanations: getExpandExplanations(),
             folds: await loadFolds(notes, {}),
@@ -416,15 +430,19 @@ export class PdfEditorProvider implements vscode.CustomReadonlyEditorProvider {
             }
           });
           break;
-        case 'markExplanation':
-          // Highlights set in an explanation: only its marks change, Claude's text stays.
+        case 'editExplanation':
+          // Edited in its card (own text, highlights, deletions); unchanged blocks keep their source.
+          // Typing has the editor's own undo; only highlighting the collapsed key message is a step.
           queue(async () => {
             const text = (await readExplanations()) ?? '';
             const old = pageExplanation(parseExplanations(text), msg.page);
             const after = setExplanation(text, msg.page, preserveSource(old, msg.text.trimEnd()).trimEnd());
+            explanationEcho.set(msg.page, { stored: pageExplanation(parseExplanations(after), msg.page), webview: msg.text });
             if (after !== text) {
-              undoStack.push({ added: [], removed: [], explanations: { before: text, after } });
-              redoStack.length = 0;
+              if (msg.undoable) {
+                undoStack.push({ added: [], removed: [], explanations: { before: text, after } });
+                redoStack.length = 0;
+              }
               await vscode.workspace.fs.writeFile(explanations, Buffer.from(after));
             }
           });
@@ -564,7 +582,7 @@ function claudeContext(
       '',
       `## Your earlier explanations of page ${page}`,
       '',
-      `Excerpt from \`${rel(explanationsUri(pdf))}\`:`,
+      `Excerpt from \`${rel(explanationsUri(pdf))}\` (italic text there is mine, the rest is yours):`,
       '',
       fenced(explained.map((s) => explanationsText!.slice(s.start, s.end).trim()).join('\n\n')),
     );

@@ -2,6 +2,7 @@ import { keymap } from '@milkdown/kit/prose/keymap';
 import { Fragment, type Node as ProseNode, type NodeRange } from '@milkdown/kit/prose/model';
 import { type Command, type EditorState, NodeSelection, TextSelection, type Transaction } from '@milkdown/kit/prose/state';
 import type { EditorView } from '@milkdown/kit/prose/view';
+import { canJoin } from '@milkdown/kit/prose/transform';
 import { $prose } from '@milkdown/kit/utils';
 
 function isList(node: ProseNode): boolean {
@@ -169,16 +170,34 @@ function moveBlocks(direction: -1 | 1): Command {
 // Tab / Shift+Tab inside a list only indents / outdents the touched lines. Returns false outside lists.
 // Always consumes the key in lists, so Crepe's indent plugin can't insert spaces when indenting isn't possible.
 export function indentListItems(view: EditorView, outdent: boolean): boolean {
-  const { state } = view;
-  if (!state.selection.$from.blockRange(state.selection.$to, isList)) {
+  if (!view.state.selection.$from.blockRange(view.state.selection.$to, isList)) {
     return false;
   }
+  if (!outdent) {
+    joinPreviousList(view);
+  }
+  const { state } = view;
   const tr = state.tr;
   const map = editListRows(tr, state, shiftRows(outdent ? -1 : 1));
   if (map) {
     view.dispatch(applySelection(tr, state, map));
   }
   return true;
+}
+
+// Adjacent lists look like one (Markdown starts a new list when the bullet character changes, e.g.
+// `-` then `*`), but the first item of the lower one could never be indented: joins them first.
+function joinPreviousList(view: EditorView): void {
+  const { $from } = view.state.selection;
+  let rootDepth = 0;
+  for (let d = $from.depth; d >= 1; d--) {
+    rootDepth = isList($from.node(d)) ? d : rootDepth;
+  }
+  const rootPos = $from.before(rootDepth);
+  const before = view.state.doc.resolve(rootPos).nodeBefore;
+  if (before?.type === $from.node(rootDepth).type && canJoin(view.state.doc, rootPos)) {
+    view.dispatch(view.state.tr.join(rootPos));
+  }
 }
 
 export const moveBlocksKeymap = $prose(() =>

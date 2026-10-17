@@ -1,4 +1,5 @@
-import { Selection, TextSelection } from '@milkdown/kit/prose/state';
+import { Plugin, Selection, type TextSelection } from '@milkdown/kit/prose/state';
+import { $prose } from '@milkdown/kit/utils';
 import type { EditorView } from '@milkdown/kit/prose/view';
 import * as pdfjs from 'pdfjs-dist';
 import type { PDFPageProxy, RenderTask } from 'pdfjs-dist';
@@ -146,6 +147,8 @@ let hoveredClaude: number | undefined;
 const freshNotes = new Set<string>();
 // Claude's explanations (`paper.pdf.claude.md`) as received.
 let explanations: Section[] = [];
+// Per page: the explanation as the webview sent it, while the file holds it (in its own formatting).
+let ownExplanations: Record<number, string> = {};
 let showExplanations = true;
 // All explanations expanded (lightbulb); pages in `toggled` show the other state.
 let expandExplanations = false;
@@ -703,7 +706,9 @@ function noteAt(pv: PageView, e: MouseEvent): Section | undefined {
 // ---------- Explanations by Claude ----------
 
 // Claude's explanation sits at the top of the page note card: its key message (first paragraph)
-// always, the rest when expanded (read-only editor, created once near the viewport).
+// when collapsed, the whole explanation in an editor when expanded (created once near the viewport).
+// The user may edit it; what they type is always italic (`ownItalic`), Claude never writes italics,
+// so authorship stays visible.
 function createClaude(cardEl: HTMLElement, page: number): Claude {
   const claudeEl = el('div', 'claude', cardEl);
   const head = el('div', 'claude-head', claudeEl);
@@ -741,7 +746,37 @@ function createClaude(cardEl: HTMLElement, page: number): Claude {
       showPopover();
     }
   });
+  // Changes that arrived while typing are shown once the editor is left.
+  claudeEl.addEventListener('focusout', () =>
+    setTimeout(() => {
+      if (!claudeEl.contains(document.activeElement)) {
+        updateClaude(cards.get(pageKey(page))!);
+      }
+    }),
+  );
   return { page, el: claudeEl, summary, body, source: '' };
+}
+
+// Text typed into an explanation is italic: the cursor always carries the emphasis mark (also after
+// moving it next to Claude's text). Moved or pasted text keeps its formatting.
+const ownItalic = $prose(
+  () =>
+    new Plugin({
+      appendTransaction: (_trs, _old, state) => {
+        const em = state.schema.marks.emphasis;
+        const $cursor = (state.selection as TextSelection).$cursor;
+        if (!em || !$cursor || !$cursor.parent.type.allowsMarkType(em)) {
+          return null;
+        }
+        const marks = state.storedMarks ?? $cursor.marks();
+        return em.isInSet(marks) ? null : state.tr.setStoredMarks(em.create().addToSet(marks));
+      },
+    }),
+);
+
+// A page's explanation as shown: the text the webview sent last if the file still holds it.
+function explanationText(page: number): string {
+  return showExplanations ? (ownExplanations[page] ?? pageExplanation(explanations, page)) : '';
 }
 
 // A page's explanation: key message (first paragraph) and the rest.
@@ -750,15 +785,18 @@ function splitExplanation(markdown: string): { first: string; rest: string } {
   return split ? { first: markdown.slice(0, split.index), rest: markdown.slice(split.index + split[0].length).trim() } : { first: markdown, rest: '' };
 }
 
-// The editor is read-only; it only changes when the user highlights something (markExplanation).
 function ensureClaudeEditor(claude: Claude): void {
   claude.creating ??= (async () => {
     claude.body.textContent = '';
-    const editor = await createNoteEditor(claude.body, claude.source, (markdown) => {
-      const { first } = splitExplanation(pageExplanation(explanations, claude.page));
-      post({ type: 'markExplanation', page: claude.page, text: `${first}\n\n${markdown}` });
-    });
-    editor.crepe.setReadonly(true);
+    const editor = await createNoteEditor(
+      claude.body,
+      claude.source,
+      (markdown) => {
+        claude.source = markdown;
+        post({ type: 'editExplanation', page: claude.page, text: markdown, undoable: false });
+      },
+      (crepe) => crepe.editor.use(ownItalic),
+    );
     claude.editor = editor;
     return editor;
   })();
@@ -797,28 +835,28 @@ function explanationAtSelection(): Card | undefined {
   return claudeEl ? [...cards.values()].find((c) => c.claude?.el === claudeEl) : undefined;
 }
 
-// Highlights the selection in an explanation; without one the whole bullet at the cursor. The key
-// message is highlighted as a whole. color null removes highlights. Then the focus leaves the card,
-// so Cmd+Z undoes it.
-function markExplanation(card: Card, color: string | null): void {
-  const claude = card.claude!;
-  const selection = window.getSelection()!;
-  if (claude.summary.contains(selection.anchorNode)) {
-    const { first, rest } = splitExplanation(pageExplanation(explanations, claude.page));
-    post({ type: 'markExplanation', page: claude.page, text: [toggleSummaryMark(first, color), rest].filter(Boolean).join('\n\n') });
-  } else if (claude.editor && claude.body.contains(selection.anchorNode) && claude.body.contains(selection.focusNode)) {
-    const view = claude.editor.view();
-    const from = view.posAtDOM(selection.anchorNode!, selection.anchorOffset);
-    const to = view.posAtDOM(selection.focusNode!, selection.focusOffset);
-    view.dispatch(view.state.tr.setSelection(TextSelection.create(view.state.doc, from, to)));
-    runFormatCommand(claude.editor, color ? 'ToggleHighlight' : 'RemoveHighlight', color);
-  } else {
-    return;
-  }
-  selection.removeAllRanges();
-  (document.activeElement as HTMLElement | null)?.blur();
+function inSummary(card: Card): boolean {
+  return !!card.claude?.summary.contains(window.getSelection()?.anchorNode ?? null);
+}
+
+// Highlights the collapsed key message as a whole (color null removes it); undoable with Cmd+Z.
+function markSummary(card: Card, color: string | null): void {
+  const { first, rest } = splitExplanation(explanationText(card.section.page));
+  const text = [toggleSummaryMark(first, color), rest].filter(Boolean).join('\n\n');
+  post({ type: 'editExplanation', page: card.section.page, text, undoable: true });
+  window.getSelection()?.removeAllRanges();
   setActiveEditor(undefined);
   hidePopover();
+}
+
+// The popover's dots on a selection in an explanation: the key message, else the editor.
+function highlightExplanation(card: Card, color: string): void {
+  if (inSummary(card)) {
+    markSummary(card, color);
+  } else if (card.claude?.editor) {
+    runFormatCommand(card.claude.editor, 'ToggleHighlight', color);
+    hidePopover();
+  }
 }
 
 function updateClaude(card: Card): void {
@@ -827,11 +865,11 @@ function updateClaude(card: Card): void {
     return;
   }
   const page = card.section.page;
-  const markdown = showExplanations ? pageExplanation(explanations, page) : '';
-  const { first, rest } = splitExplanation(markdown);
-  const open = !!rest && expandExplanations !== toggled.has(page);
+  const markdown = explanationText(page);
+  const { first } = splitExplanation(markdown);
+  const open = !!markdown && expandExplanations !== toggled.has(page);
   card.el.classList.toggle('has-claude', !!markdown);
-  claude.el.classList.toggle('more', !!rest);
+  claude.el.classList.toggle('more', !!markdown);
   claude.el.classList.toggle('open', open);
   const color = summaryColor(first);
   claude.summary.textContent = color ? '' : plain(first);
@@ -844,12 +882,13 @@ function updateClaude(card: Card): void {
       mark.style.background = color;
     }
   }
-  if (rest !== claude.source) {
-    claude.source = rest;
+  // Not while typing in it (a late echo would reset the editor).
+  if (markdown !== claude.source && !claude.el.contains(document.activeElement)) {
+    claude.source = markdown;
     if (claude.editor) {
-      claude.editor.setMarkdown(rest);
+      claude.editor.setMarkdown(markdown);
     } else if (!claude.creating) {
-      claude.body.textContent = rest;
+      claude.body.textContent = markdown;
     }
   }
   if (open && card.creating) {
@@ -857,8 +896,9 @@ function updateClaude(card: Card): void {
   }
 }
 
-function applyExplanations(sections: Section[]): void {
+function applyExplanations(sections: Section[], own: Record<number, string> = ownExplanations): void {
   explanations = sections;
+  ownExplanations = own;
   cards.forEach(updateClaude);
   layoutAll();
 }
@@ -1375,7 +1415,7 @@ for (const color of COLORS) {
     e.preventDefault();
     const explained = explanationAtSelection();
     if (explained) {
-      markExplanation(explained, color);
+      highlightExplanation(explained, color);
     } else {
       markSelection(color, true);
     }
@@ -1529,6 +1569,8 @@ window.addEventListener(
     // Shift+Delete/Backspace in a card deletes its whole note (with the mark; a page note is emptied).
     const cardEl = (document.activeElement as HTMLElement | null)?.closest('.card');
     const typingCard = [...cards.values()].find((c) => c.el === cardEl);
+    // Typing in Claude's explanation (part of the page note card).
+    const inClaude = !!(document.activeElement as HTMLElement | null)?.closest('.claude');
     // Shift+Enter finishes editing a card (outside code blocks, where it stays a line break).
     if (e.key === 'Enter' && e.shiftKey && typingCard && !e.altKey && !e.metaKey && !e.ctrlKey && !(document.activeElement as HTMLElement).closest('.cm-editor')) {
       e.preventDefault();
@@ -1537,7 +1579,7 @@ window.addEventListener(
       setActiveEditor(undefined);
       return;
     }
-    if ((e.key === 'Delete' || e.key === 'Backspace') && e.shiftKey && typingCard && !e.altKey && !e.metaKey && !e.ctrlKey) {
+    if ((e.key === 'Delete' || e.key === 'Backspace') && e.shiftKey && typingCard && !inClaude && !e.altKey && !e.metaKey && !e.ctrlKey) {
       e.preventDefault();
       e.stopImmediatePropagation();
       if (typingCard.section.anchor) {
@@ -1560,14 +1602,14 @@ window.addEventListener(
     if (!e.altKey || e.metaKey || e.ctrlKey) {
       return;
     }
-    // Alt+Q/W/E/R in Claude's explanation: highlight the selection or the bullet at the cursor.
-    // Alt+X removes highlights there.
+    // Alt+Q/W/E/R in the collapsed key message of an explanation highlight it, Alt+X removes that
+    // (in the expanded explanation, its editor handles the shortcuts like any card).
     const marking = !e.shiftKey && (HIGHLIGHT_KEYS[e.code] || e.code === REMOVE_HIGHLIGHT_KEY);
-    const explained = marking ? explanationAtSelection() : undefined;
-    if (explained) {
+    const summaryCard = marking ? explanationAtSelection() : undefined;
+    if (summaryCard && inSummary(summaryCard)) {
       e.preventDefault();
       e.stopImmediatePropagation();
-      markExplanation(explained, HIGHLIGHT_KEYS[e.code] ?? null);
+      markSummary(summaryCard, HIGHLIGHT_KEYS[e.code] ?? null);
       return;
     }
     // Alt+Y in a card: collapse the list item or heading section at the cursor (like in notes).
@@ -1576,7 +1618,8 @@ window.addEventListener(
     if ((e.key === '¥' || e.key.toLowerCase() === 'y') && focused) {
       e.preventDefault();
       e.stopImmediatePropagation();
-      const editor = [...cards.values()].find((c) => c.el === focused)?.editor;
+      const card = [...cards.values()].find((c) => c.el === focused);
+      const editor = inClaude ? card?.claude?.editor : card?.editor;
       if (editor) {
         toggleFold(editor.view());
         editor.view().focus();
@@ -1599,6 +1642,14 @@ window.addEventListener(
     // Alt+K in a card without selected text asks Claude about the whole note (with selected text or
     // the cursor in a bullet it mentions those lines of the notes file, see installShortcuts).
     const focusedCard = [...cards.values()].find((c) => c.el === focused);
+    // Alt+K in Claude's explanation asks about the selected passage, else the whole explanation.
+    if (e.code === 'KeyK' && focusedCard && inClaude) {
+      e.preventDefault();
+      e.stopImmediatePropagation();
+      const quote = window.getSelection()?.toString().replace(/\s+/g, ' ').trim();
+      post({ type: 'askClaude', page: focusedCard.section.page, quote: quote || undefined, explanation: true });
+      return;
+    }
     const cardState = focusedCard?.editor?.view().state;
     if (e.code === 'KeyK' && focusedCard && cardState?.selection.empty && !listItemRange(cardState)) {
       e.preventDefault();
@@ -1645,6 +1696,7 @@ window.addEventListener('message', async (event) => {
       latestSections = msg.sections;
       dividers = msg.dividers;
       explanations = msg.explanations;
+      ownExplanations = msg.ownExplanations;
       showExplanations = msg.showExplanations;
       expandExplanations = msg.expandExplanations;
       folds = msg.folds;
@@ -1661,7 +1713,7 @@ window.addEventListener('message', async (event) => {
       post({ type: 'pageTexts', texts: await allPageTexts() });
       break;
     case 'explanations':
-      applyExplanations(msg.sections);
+      applyExplanations(msg.sections, msg.own);
       break;
     case 'showExplanations':
       showExplanations = msg.show;
