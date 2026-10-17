@@ -12,14 +12,15 @@ import {
   type Rect,
   type Section,
   addNote,
-  clearExplanation,
   deleteNote,
   formatAnchor,
+  pageExplanation,
   pageKey,
   parseDividers,
   parseExplanations,
   parseSections,
   setDividers,
+  setExplanation,
   setNoteBody,
 } from './sidecar';
 import type { Fold } from './webview/fold';
@@ -37,6 +38,7 @@ type WebviewMessage =
   | { type: 'view'; page: number; pages: number }
   | { type: 'pageTexts'; texts: string[] }
   | { type: 'deleteExplanation'; page: number }
+  | { type: 'markExplanation'; page: number; text: string }
   | { type: 'editDivider'; after: number }
   | { type: 'deleteDivider'; after: number }
   | { type: 'drawRemote'; id: number; drawing: unknown; src: string | null };
@@ -406,7 +408,20 @@ export class PdfEditorProvider implements vscode.CustomReadonlyEditorProvider {
         case 'deleteExplanation':
           queue(async () => {
             const text = (await readExplanations()) ?? '';
-            const after = clearExplanation(text, msg.page);
+            const after = setExplanation(text, msg.page, '');
+            if (after !== text) {
+              undoStack.push({ added: [], removed: [], explanations: { before: text, after } });
+              redoStack.length = 0;
+              await vscode.workspace.fs.writeFile(explanations, Buffer.from(after));
+            }
+          });
+          break;
+        case 'markExplanation':
+          // Highlights set in an explanation: only its marks change, Claude's text stays.
+          queue(async () => {
+            const text = (await readExplanations()) ?? '';
+            const old = pageExplanation(parseExplanations(text), msg.page);
+            const after = setExplanation(text, msg.page, preserveSource(old, msg.text.trimEnd()).trimEnd());
             if (after !== text) {
               undoStack.push({ added: [], removed: [], explanations: { before: text, after } });
               redoStack.length = 0;

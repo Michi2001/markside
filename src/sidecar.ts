@@ -210,14 +210,15 @@ export function pageExplanation(sections: Section[], page: number): string {
   return [body, terms.join('\n')].filter(Boolean).join('\n\n');
 }
 
-// Removes a page's explanation but keeps its empty heading, so the page still counts as explained.
-export function clearExplanation(text: string, page: number): string {
+// Replaces a page's explanation (older term sections are merged into it); an empty body keeps the
+// empty heading, so the page still counts as explained.
+export function setExplanation(text: string, page: number, body: string): string {
   const own = parseSections(text).filter((s) => s.page === page);
   if (own.length === 0) {
     return text;
   }
   const tail = text.slice(Math.max(...own.map((s) => s.end)));
-  return text.slice(0, Math.min(...own.map((s) => s.start))) + `## Page ${page}\n` + (tail ? `\n${tail}` : '');
+  return text.slice(0, Math.min(...own.map((s) => s.start))) + `## Page ${page}\n` + (body ? `\n${body}\n` : '') + (tail ? `\n${tail}` : '');
 }
 
 // Dividers between pages (lecture ends, own sections) as a list before the first page:

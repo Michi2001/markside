@@ -13,7 +13,7 @@ export const HIGHLIGHT_COLORS: Record<string, string> = {
 };
 
 // Maps a `<mark>` style attribute to a palette name, or keeps an unknown CSS color as is.
-function colorFromStyle(tag: string): string {
+export function colorFromStyle(tag: string): string {
   const background = /background(?:-color)?\s*:\s*([^;"']+)/i.exec(tag)?.[1].trim();
   if (!background) {
     return 'yellow';
@@ -38,23 +38,55 @@ function parseHtmlMarks(children: MdNode[]): MdNode[] {
   return result;
 }
 
-// Splits `==text==` inside plain text nodes into `highlight` mdast nodes (Obsidian syntax).
+// Turns `==text==` into `highlight` mdast nodes (Obsidian syntax). The highlight may span several
+// nodes of one paragraph (`==a $x$ **b**==`): text nodes are split at `==` and each pair of
+// delimiters wraps the nodes between them; an unpaired `==` stays text.
 function parseHighlights(node: MdNode): void {
   if (!node.children) {
     return;
   }
-  node.children = parseHtmlMarks(node.children).flatMap((child) => {
+  const items: (MdNode | 'delimiter')[] = [];
+  for (const child of parseHtmlMarks(node.children)) {
     if (child.type !== 'text') {
       parseHighlights(child);
-      return [child];
+      items.push(child);
+      continue;
     }
-    const parts = (child.value ?? '').split(/==([^=]+)==/);
-    return parts
-      .map((value, i): MdNode =>
-        i % 2 === 1 ? { type: 'highlight', children: [{ type: 'text', value }] } : { type: 'text', value },
-      )
-      .filter((n) => n.type === 'highlight' || n.value);
-  });
+    (child.value ?? '').split('==').forEach((value, i) => {
+      if (i > 0) {
+        items.push('delimiter');
+      }
+      if (value) {
+        items.push({ type: 'text', value });
+      }
+    });
+  }
+  const result: MdNode[] = [];
+  const pushText = (value: string) => {
+    const last = result[result.length - 1];
+    if (last?.type === 'text') {
+      last.value += value;
+    } else {
+      result.push({ type: 'text', value });
+    }
+  };
+  for (let i = 0; i < items.length; i++) {
+    const item = items[i];
+    const end = item === 'delimiter' ? items.indexOf('delimiter', i + 1) : -1;
+    if (item !== 'delimiter') {
+      if (item.type === 'text') {
+        pushText(item.value!);
+      } else {
+        result.push(item);
+      }
+    } else if (end > i + 1) {
+      result.push({ type: 'highlight', children: items.slice(i + 1, end) as MdNode[] });
+      i = end;
+    } else {
+      pushText('==');
+    }
+  }
+  node.children = result;
 }
 
 export function remarkHighlightPlugin(this: any) {
@@ -118,6 +150,36 @@ export const toggleHighlightCommand = $command('ToggleHighlight', (ctx) => (colo
   return true;
 });
 
+// Removes highlights from the selection; with only a cursor, the highlight around it.
+export const removeHighlightCommand = $command('RemoveHighlight', (ctx) => () => (state, dispatch) => {
+  const type = highlightSchema.type(ctx);
+  let { from, to } = state.selection;
+  if (from === to) {
+    const $pos = state.selection.$from;
+    let runStart = -1;
+    let range: { from: number; to: number } | undefined;
+    $pos.parent.forEach((child, offset) => {
+      const pos = $pos.start() + offset;
+      if (!type.isInSet(child.marks)) {
+        runStart = -1;
+        return;
+      }
+      if (runStart < 0) {
+        runStart = pos;
+      }
+      if (runStart <= from && from <= pos + child.nodeSize) {
+        range = { from: runStart, to: pos + child.nodeSize };
+      }
+    });
+    if (!range) {
+      return false;
+    }
+    ({ from, to } = range);
+  }
+  dispatch?.(state.tr.removeMark(from, to, type));
+  return true;
+});
+
 export const highlightInputRule = $inputRule((ctx) => markRule(/(?:==)([^=]+)(?:==)$/, highlightSchema.type(ctx)));
 
-export const highlight = [remarkHighlight, highlightSchema, toggleHighlightCommand, highlightInputRule].flat();
+export const highlight = [remarkHighlight, highlightSchema, toggleHighlightCommand, removeHighlightCommand, highlightInputRule].flat();

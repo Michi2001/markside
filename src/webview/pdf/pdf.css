@@ -684,3 +684,23 @@ body.alt .page .textLayer span {
 .divider-del:hover {
   color: var(--vscode-foreground);
 }
+
+/* Highlights in the key message of an explanation (like .milkdown mark in style.css). */
+.claude-summary mark {
+  background: rgba(255, 208, 0, 0.4);
+  color: inherit;
+  border-radius: 2px;
+  padding: 0 1px;
+}
+
+.claude-summary mark[data-color='red'] {
+  background: rgba(255, 70, 110, 0.4);
+}
+
+.claude-summary mark[data-color='green'] {
+  background: rgba(60, 200, 90, 0.4);
+}
+
+.claude-summary mark[data-color='blue'] {
+  background: rgba(70, 140, 255, 0.4);
+}

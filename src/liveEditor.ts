@@ -310,6 +310,9 @@ function stripMarkdown(line: string): string {
   return line
     .replace(/!\[[^\]]*\]\([^)]*\)/g, '')
     .replace(/\[([^\]]*)\]\([^)]*\)/g, '$1')
+    // Highlights (`==text==`, `<mark style="…">`) and other inline HTML.
+    .replace(/<[^>]+>/g, '')
+    .replace(/==([^=]+)==/g, '$1')
     .replace(/^\s*(#{1,6}\s+|>\s*|[-+*]\s+(\[[ xX]\]\s+)?|\d+\.\s+)/, '')
     .replace(/[*_`~\\|]/g, '')
     .replace(/\s+/g, ' ')

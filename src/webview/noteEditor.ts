@@ -194,7 +194,7 @@ export async function createNoteEditor(
 
 // Inside a bullet list the shortcuts act on the whole text of the touched items, even if only part
 // of it (or nothing) is selected. Returns null outside lists.
-function listItemRange(state: EditorState): { from: number; to: number } | null {
+export function listItemRange(state: EditorState): { from: number; to: number } | null {
   const { $from, $to } = state.selection;
   const inItem = ($pos: typeof $from) => $pos.parent.isTextblock && $pos.depth > 1 && $pos.node(-1).type.name === 'list_item';
   if (!inItem($from) || !inItem($to)) {
@@ -232,6 +232,9 @@ export const HIGHLIGHT_KEYS: Record<string, string> = {
   KeyR: 'blue',
 };
 
+// Alt+X removes highlights (any color).
+export const REMOVE_HIGHLIGHT_KEY = 'KeyX';
+
 // Alt+<key> heading levels; 0 = back to text. The key left of 1 (^ on German Macs) reports
 // IntlBackslash or Backquote depending on the keyboard, so both are accepted.
 const HEADING_KEYS: Record<string, number> = {
@@ -246,10 +249,10 @@ const HEADING_KEYS: Record<string, number> = {
 };
 
 // Runs a formatting command; in lists it applies to the whole item text, then restores the cursor.
-// Highlights only expand to the whole item when nothing is selected.
-function runFormatCommand(editor: NoteEditor, command: string, payload?: unknown): void {
+// Highlights (and removing them) only expand to the whole item when nothing is selected.
+export function runFormatCommand(editor: NoteEditor, command: string, payload?: unknown): void {
   const view = editor.view();
-  const keepSelection = command === 'ToggleLatex' || (command === 'ToggleHighlight' && !view.state.selection.empty);
+  const keepSelection = command === 'ToggleLatex' || (['ToggleHighlight', 'RemoveHighlight'].includes(command) && !view.state.selection.empty);
   const range = keepSelection ? null : listItemRange(view.state);
   const { anchor, head } = view.state.selection;
   if (range) {
@@ -298,6 +301,10 @@ export function installShortcuts(ignore: (e: KeyboardEvent) => boolean): void {
         e.preventDefault();
         e.stopPropagation();
         runFormatCommand(editor, command);
+      } else if (e.code === REMOVE_HIGHLIGHT_KEY) {
+        e.preventDefault();
+        e.stopPropagation();
+        runFormatCommand(editor, 'RemoveHighlight');
       } else if (HIGHLIGHT_KEYS[e.code]) {
         e.preventDefault();
         e.stopPropagation();
