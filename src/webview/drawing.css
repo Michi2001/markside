@@ -77,6 +77,12 @@ body[data-theme='auto'].vscode-high-contrast:not(.vscode-high-contrast-light) .m
   height: 22px;
 }
 
+.mdlive-drawing-toolbar .mdlive-tool:disabled {
+  opacity: 0.35;
+  background: transparent;
+  cursor: default;
+}
+
 /* Active tool: accent tint with an accent underline. */
 .mdlive-drawing-toolbar .mdlive-tool.active {
   background: var(--mdlive-accent-tint);

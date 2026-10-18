@@ -594,6 +594,94 @@ body.alt .page .textLayer span {
 
 
 
+/* ---------- Annotations proposed by Claude ---------- */
+
+/* Dashed in Claude's violet with the sparkle: clearly not (yet) part of the note. */
+.proposal {
+  margin: 4px 8px 8px;
+  padding: 6px 8px;
+  border: 1px dashed color-mix(in srgb, var(--explain) 70%, transparent);
+  border-radius: 6px;
+  background: color-mix(in srgb, var(--explain) 6%, transparent);
+  font-family: var(--vscode-font-family);
+  font-size: calc(var(--mdlive-font-size, 16px) * 0.8125);
+  line-height: 1.4;
+}
+
+.claude .proposal {
+  margin: 0 8px 8px 26px;
+}
+
+.proposal-head {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  min-width: 0;
+  font-size: 11px;
+  color: var(--explain);
+}
+
+.proposal-head::before {
+  content: '';
+  flex: none;
+  width: 10px;
+  height: 10px;
+  background: var(--explain);
+  -webkit-mask: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 16 16'%3E%3Cpath d='M8 0.5C8.6 5 11 7.4 15.5 8C11 8.6 8.6 11 8 15.5C7.4 11 5 8.6 0.5 8C5 7.4 7.4 5 8 0.5Z'/%3E%3C/svg%3E") center / contain no-repeat;
+}
+
+.proposal-label {
+  flex: none;
+  font-weight: 600;
+}
+
+.proposal-quote {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  opacity: 0.8;
+}
+
+.proposal-text {
+  margin: 4px 0 6px;
+}
+
+.proposal-bullet {
+  position: relative;
+}
+
+.proposal-bullet::before {
+  content: '•';
+  position: absolute;
+  left: -0.8em;
+}
+
+.proposal-actions {
+  display: flex;
+  gap: 6px;
+}
+
+.proposal-actions button {
+  padding: 1px 8px;
+  border: 1px solid color-mix(in srgb, var(--explain) 50%, transparent);
+  border-radius: 4px;
+  background: transparent;
+  color: inherit;
+  font: inherit;
+  font-size: 12px;
+  cursor: pointer;
+}
+
+.proposal-actions .proposal-accept {
+  background: var(--explain);
+  border-color: var(--explain);
+  color: #fff;
+}
+
+.proposal-actions button:hover {
+  filter: brightness(1.1);
+}
+
 /* ---------- Dividers (lecture ends, own sections) ---------- */
 
 /* Sits in the gap below its row: a "+" on hover where there is none, else a line with its label. */

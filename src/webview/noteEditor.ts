@@ -3,10 +3,11 @@ import '@milkdown/crepe/theme/common/style.css';
 import { imageBlockSchema } from '@milkdown/kit/component/image-block';
 import { commandsCtx, editorViewCtx, remarkPluginsCtx, remarkStringifyOptionsCtx } from '@milkdown/kit/core';
 import { clearTextInCurrentBlockCommand } from '@milkdown/kit/preset/commonmark';
-import { type EditorState, TextSelection } from '@milkdown/kit/prose/state';
-import type { EditorView } from '@milkdown/kit/prose/view';
-import { callCommand, insert, replaceAll } from '@milkdown/kit/utils';
-import { type Drawing, drawingFile, imageDrawing, isDrawing, isDrawingOpen, loadDrawing, openDrawingEditor } from './drawing';
+import { type EditorState, Plugin, TextSelection } from '@milkdown/kit/prose/state';
+import { Decoration, DecorationSet, type EditorView } from '@milkdown/kit/prose/view';
+import { $prose, callCommand, insert, replaceAll } from '@milkdown/kit/utils';
+import { AI_MARK } from '../sidecar';
+import { type Drawing, drawingFile, drawingPng, imageDrawing, isDrawing, isDrawingOpen, loadDrawing, openDrawingEditor } from './drawing';
 import { setHeading, shiftHeading } from './headings';
 import { highlight } from './highlight';
 import { drawRemotely, host, post, resolveUrl, saveFile, uploadImage } from './host';
@@ -26,6 +27,28 @@ export type NoteEditor = {
 };
 
 let active: NoteEditor | undefined;
+
+// Annotations accepted from Claude start with AI_MARK; they are shown in Claude's color (a bullet
+// with its sub-bullets).
+const aiAnnotations = $prose(
+  () =>
+    new Plugin({
+      props: {
+        decorations: (state) => {
+          const decorations: Decoration[] = [];
+          state.doc.descendants((node, pos) => {
+            const paragraph = node.type.name === 'list_item' ? node.firstChild : node;
+            if (['list_item', 'paragraph'].includes(node.type.name) && paragraph?.type.name === 'paragraph' && paragraph.textContent.startsWith(AI_MARK)) {
+              decorations.push(Decoration.node(pos, pos + node.nodeSize, { class: 'mdlive-ai' }));
+              return false;
+            }
+            return !node.isTextblock;
+          });
+          return DecorationSet.create(state.doc, decorations);
+        },
+      },
+    }),
+);
 
 export function getActiveEditor(): NoteEditor | undefined {
   return active;
@@ -144,7 +167,7 @@ export async function createNoteEditor(
       onChange(markdown);
     });
   });
-  crepe.editor.use(moveBlocksKeymap).use(highlight);
+  crepe.editor.use(moveBlocksKeymap).use(highlight).use(aiAnnotations);
   configure?.(crepe);
   await crepe.create();
   const view = editor.view();
@@ -203,15 +226,29 @@ export function listItemRange(state: EditorState): { from: number; to: number } 
   return { from: $from.start(), to: $to.end() };
 }
 
-// Sends the selected plain text of the active editor to the extension (Alt+K → Claude).
-export function sendSelection(): void {
+// A drawing asked about with Alt+K: its link in the note and the drawing as PNG (base64).
+export type ClaudeDrawing = { src: string; png: string };
+
+// Drawings in the selection (a clicked drawing is selected as a node), rendered as PNG for Claude.
+export function selectedDrawings(state: EditorState): Promise<ClaudeDrawing[]> {
+  const srcs: string[] = [];
+  state.doc.nodesBetween(state.selection.from, state.selection.to, (node) => {
+    if ((node.type.name === 'image-block' || node.type.name === 'image') && isDrawing(node.attrs.src)) {
+      srcs.push(node.attrs.src);
+    }
+  });
+  return Promise.all(srcs.map(async (src) => ({ src, png: await drawingPng(resolveUrl(src)) })));
+}
+
+// Sends the selected plain text of the active editor (and the drawings in it) to the extension (Alt+K → Claude).
+export async function sendSelection(): Promise<void> {
   if (!active) {
     post({ type: 'selection', text: '' });
     return;
   }
   const { state } = active.view();
   const { from, to } = listItemRange(state) ?? state.selection;
-  post({ type: 'selection', text: state.doc.textBetween(from, to, '\n', ' ') });
+  post({ type: 'selection', text: state.doc.textBetween(from, to, '\n', ' '), drawings: await selectedDrawings(state) });
 }
 
 // Alt+<key> formatting commands (Crepe/Milkdown command names).

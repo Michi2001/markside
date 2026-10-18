@@ -1,6 +1,6 @@
 import * as path from 'path';
 import * as vscode from 'vscode';
-import { cleanupAssets, explanationsUri, loadFolds, notesUri, saveFolds, saveImage, writeClaudeContext } from './assets';
+import { claudeDrawingLines, cleanupAssets, explanationsUri, loadFolds, notesUri, proposalsUri, saveFolds, saveImage, writeClaudeContext } from './assets';
 import { DrawingServer, getDrawingDevice } from './drawingServer';
 import { type PdfView, explainSlides, isExplaining } from './explain';
 import type { FontSizes } from './fontSizes';
@@ -9,21 +9,27 @@ import { preserveSource } from './preserve';
 import {
   type Anchor,
   type Divider,
+  type Proposal,
   type Rect,
   type Section,
   addNote,
   deleteNote,
   formatAnchor,
+  formatProposals,
+  insertAnnotation,
+  parseAnchor,
   pageExplanation,
   pageKey,
   parseDividers,
   parseExplanations,
+  parseProposals,
   parseSections,
   setDividers,
   setExplanation,
   setNoteBody,
 } from './sidecar';
 import type { Fold } from './webview/fold';
+import type { ClaudeDrawing } from './webview/noteEditor';
 
 type WebviewMessage =
   | { type: 'ready' }
@@ -34,25 +40,31 @@ type WebviewMessage =
   | { type: 'folds'; folds: Record<string, Fold[]> }
   | { type: 'saveImage'; id: number; name: string; mime: string; data: string }
   | { type: 'selection'; text: string }
-  | { type: 'askClaude'; page: number; quote?: string; rects?: Rect[]; key?: string; note?: boolean; explanation?: boolean }
+  | { type: 'askClaude'; page: number; quote?: string; rects?: Rect[]; color?: string; key?: string; note?: boolean; explanation?: boolean; drawings?: ClaudeDrawing[] }
   | { type: 'view'; page: number; pages: number }
   | { type: 'pageTexts'; texts: string[] }
   | { type: 'deleteExplanation'; page: number }
   | { type: 'editExplanation'; page: number; text: string; undoable: boolean }
   | { type: 'editDivider'; after: number }
   | { type: 'deleteDivider'; after: number }
+  | { type: 'acceptProposal'; id: string }
+  | { type: 'rejectProposal'; id: string }
   | { type: 'drawRemote'; id: number; drawing: unknown; src: string | null };
 
 const SAVE_DELAY_MS = 800;
+// Proposals Claude left empty (nothing worth keeping) are dropped on the next question after this.
+const EMPTY_PROPOSAL_MS = 30 * 60 * 1000;
 
 type NoteData = { anchor: Anchor; label: string; body: string };
 // One undoable step: notes added and removed together (a new mark replacing others, a deletion),
-// a dismissed explanation (the explanations file before and after) or changed dividers.
+// a dismissed explanation (the explanations file before and after), changed dividers or an
+// accepted annotation in a note (its body before and after).
 type Step = {
   added: NoteData[];
   removed: NoteData[];
   explanations?: { before: string; after: string };
   dividers?: { before: Divider[]; after: Divider[] };
+  note?: { key: string; before: string; after: string };
 };
 
 const noteData = (s: Section): NoteData => ({ anchor: s.anchor!, label: s.label, body: s.body });
@@ -269,6 +281,23 @@ export class PdfEditorProvider implements vscode.CustomReadonlyEditorProvider {
     watcher.onDidChange(sendExplanations);
     watcher.onDidDelete(sendExplanations);
 
+    // Claude writes its proposed annotations on disk too; only filled ones are shown.
+    const proposals = proposalsUri(notes);
+    const readProposals = async (): Promise<Proposal[]> => ((await exists(proposals)) ? parseProposals(await readText(proposals)) : []);
+    const writeProposals = (list: Proposal[]) => vscode.workspace.fs.writeFile(proposals, Buffer.from(formatProposals(list)));
+    const filledProposals = async (): Promise<Proposal[]> => (await readProposals()).filter((p) => p.body);
+    const sendProposals = async (): Promise<void> => {
+      panel.webview.postMessage({ type: 'proposals', proposals: await filledProposals() });
+    };
+    const proposalWatcher = vscode.workspace.createFileSystemWatcher(new vscode.RelativePattern(docDir, path.relative(docDir.path, proposals.path)));
+    proposalWatcher.onDidCreate(sendProposals);
+    proposalWatcher.onDidChange(sendProposals);
+    proposalWatcher.onDidDelete(sendProposals);
+    const removeProposal = async (id: string): Promise<void> => {
+      await writeProposals((await readProposals()).filter((p) => p.id !== id));
+      sendProposals();
+    };
+
     const configSub = vscode.workspace.onDidChangeConfiguration((e) => {
       if (e.affectsConfiguration('mdLive.theme')) {
         panel.webview.postMessage({ type: 'theme', theme: getTheme() });
@@ -296,6 +325,7 @@ export class PdfEditorProvider implements vscode.CustomReadonlyEditorProvider {
     panel.onDidDispose(() => {
       changeSub.dispose();
       watcher.dispose();
+      proposalWatcher.dispose();
       viewStateSub.dispose();
       if (this.active === view) {
         this.active = undefined;
@@ -332,6 +362,7 @@ export class PdfEditorProvider implements vscode.CustomReadonlyEditorProvider {
             showExplanations: getShowExplanations(),
             expandExplanations: getExpandExplanations(),
             folds: await loadFolds(notes, {}),
+            proposals: await filledProposals(),
           });
           break;
         case 'editNote':
@@ -393,7 +424,16 @@ export class PdfEditorProvider implements vscode.CustomReadonlyEditorProvider {
                 }
               }
               const rest = remove.map((n) => formatAnchor(n.anchor)).reduce(deleteNote, text);
-              const result = add.reduce((t, n) => addNote(t, n.anchor, n.label, n.body), rest);
+              let result = add.reduce((t, n) => addNote(t, n.anchor, n.label, n.body), rest);
+              if (step.note) {
+                const [from, to] = msg.redo ? [step.note.before, step.note.after] : [step.note.after, step.note.before];
+                // Edited since: undoing would drop those edits.
+                if (parseSections(result).find((s) => s.key === step.note!.key)?.body === from) {
+                  result = setNoteBody(result, step.note.key, to);
+                } else {
+                  vscode.window.showWarningMessage('The note changed meanwhile; the annotation was not undone.');
+                }
+              }
               return step.dividers ? setDividers(result, msg.redo ? step.dividers.after : step.dividers.before) : result;
             });
             if (step.explanations) {
@@ -405,7 +445,7 @@ export class PdfEditorProvider implements vscode.CustomReadonlyEditorProvider {
                 vscode.window.showWarningMessage('The explanations file changed meanwhile; the explanation was not restored.');
               }
             }
-            const changed = [...remove, ...add].map((n) => formatAnchor(n.anchor));
+            const changed = [...remove, ...add].map((n) => formatAnchor(n.anchor)).concat(step.note ? [step.note.key] : []);
             changed.forEach((key) => echo.delete(key));
             (msg.redo ? undoStack : redoStack).push(step);
             sendNotes(changed);
@@ -447,6 +487,48 @@ export class PdfEditorProvider implements vscode.CustomReadonlyEditorProvider {
             }
           });
           break;
+        case 'acceptProposal':
+          queue(async () => {
+            const proposal = (await readProposals()).find((p) => p.id === msg.id);
+            if (!proposal?.body) {
+              return;
+            }
+            if (proposal.explanation) {
+              const text = (await readExplanations()) ?? '';
+              const old = pageExplanation(parseExplanations(text), proposal.page);
+              const after = setExplanation(text, proposal.page, insertAnnotation(old, proposal.quote, proposal.body, { mark: false, replace: proposal.replace }));
+              if (after === text) {
+                vscode.window.showWarningMessage(`Page ${proposal.page} has no explanation to add the annotation to.`);
+                return;
+              }
+              undoStack.push({ added: [], removed: [], explanations: { before: text, after } });
+              redoStack.length = 0;
+              await vscode.workspace.fs.writeFile(explanations, Buffer.from(after));
+            } else {
+              const before = parseSections(note?.getText() ?? '').find((s) => s.key === proposal.key)?.body;
+              if (before === undefined && !proposal.key.startsWith('page:')) {
+                // A selected passage without a mark yet: a new note on it.
+                const data = { anchor: parseAnchor(proposal.key), label: proposal.quote, body: insertAnnotation('', '', proposal.body, { mark: true, replace: false }) };
+                await write((text) => addNote(text, data.anchor, data.label, data.body));
+                undoStack.push({ added: [data], removed: [] });
+                redoStack.length = 0;
+                sendNotes([proposal.key]);
+                await removeProposal(proposal.id);
+                return;
+              }
+              const after = insertAnnotation(before ?? '', proposal.quote, proposal.body, { mark: true, replace: proposal.replace });
+              await write((text) => setNoteBody(text, proposal.key, after));
+              undoStack.push({ added: [], removed: [], note: { key: proposal.key, before: before ?? '', after } });
+              redoStack.length = 0;
+              echo.delete(proposal.key);
+              sendNotes([proposal.key]);
+            }
+            await removeProposal(proposal.id);
+          });
+          break;
+        case 'rejectProposal':
+          queue(() => removeProposal(msg.id));
+          break;
         case 'editDivider':
           await view.editDivider(msg.after);
           break;
@@ -482,8 +564,20 @@ export class PdfEditorProvider implements vscode.CustomReadonlyEditorProvider {
           if (note?.isDirty) {
             await note.save();
           }
-          const context = claudeContext(pdf, note?.getText(), await readExplanations(), msg);
-          const file = await writeClaudeContext(notes, context);
+          // Every question gets a proposed annotation: in the explanation, in the note (card or mark)
+          // asked about, as a new note on the selected passage, else in the page note.
+          const id = `q${Date.now()}`;
+          const key = msg.explanation
+            ? pageKey(msg.page)
+            : (msg.key ?? (msg.rects ? formatAnchor({ page: msg.page, rects: msg.rects, area: false, color: msg.color ?? 'yellow' }) : pageKey(msg.page)));
+          const mark = parseSections(note?.getText() ?? '').find((s) => s.key === key && s.anchor && !s.anchor.area);
+          const proposal: Proposal = { id, page: msg.page, key, explanation: !!msg.explanation, quote: msg.quote ?? mark?.label ?? '', body: '', replace: false };
+          const kept = (await readProposals()).filter((p) => p.body || Date.now() - Number(p.id.slice(1)) < EMPTY_PROPOSAL_MS);
+          await vscode.workspace.fs.createDirectory(vscode.Uri.joinPath(proposals, '..'));
+          await writeProposals([...kept, proposal]);
+          const context = claudeContext(pdf, note?.getText(), await readExplanations(), msg, { id, file: proposals });
+          const drawing = (await claudeDrawingLines(notes, msg.drawings ?? [])).join('\n');
+          const file = await writeClaudeContext(notes, drawing ? `${context}${drawing}\n` : context);
           await sendSelectionToClaude(await vscode.workspace.openTextDocument(file), panel, '');
           break;
         }
@@ -529,6 +623,7 @@ function claudeContext(
   notesText: string | undefined,
   explanationsText: string | undefined,
   { page, quote, rects, key, note, explanation }: { page: number; quote?: string; rects?: Rect[]; key?: string; note?: boolean; explanation?: boolean },
+  proposal?: { id: string; file: vscode.Uri },
 ): string {
   const rel = (uri: vscode.Uri) => vscode.workspace.asRelativePath(uri, false);
   const sections = parseSections(notesText ?? '').filter((s) => s.page === page && (s.anchor || s.body.trim()));
@@ -555,7 +650,7 @@ function claudeContext(
         : `The question is about your explanation of page ${page} (below).`,
     );
   }
-  const passage = explanation ? undefined : (quote ?? (mark?.anchor?.area ? undefined : mark?.label));
+  const passage = explanation || note ? undefined : (quote ?? (mark?.anchor?.area ? undefined : mark?.label));
   if (passage) {
     lines.push('', '## Marked passage', '', `> ${passage}`, '', `Position: \`#${anchor}\``);
   }
@@ -564,7 +659,8 @@ function claudeContext(
   }
   if (note && mark) {
     const heading = mark.anchor ? `### [${mark.label}](#${mark.key})` : `## Page ${page}`;
-    lines.push('', '## My note in question', '', `The question is about my note \`${heading}\`:`, '', fenced(mark.body));
+    const about = quote ? `this passage of my note \`${heading}\` (full note below):\n\n> ${quote}` : `my note \`${heading}\`:`;
+    lines.push('', '## My note in question', '', `The question is about ${about}`, '', fenced(mark.body));
   }
   if (sections.length > 0) {
     lines.push(
@@ -585,6 +681,19 @@ function claudeContext(
       `Excerpt from \`${rel(explanationsUri(pdf))}\` (italic text there is mine, the rest is yours):`,
       '',
       fenced(explained.map((s) => explanationsText!.slice(s.start, s.end).trim()).join('\n\n')),
+    );
+  }
+  if (proposal) {
+    const bullet = explanation || note;
+    const target = quote ? (bullet ? 'the bullet in question' : 'the marked passage') : explanation ? 'your explanation' : note || mark ? 'my note' : `page ${page}`;
+    const where = explanation ? 'your explanation' : mark || note ? 'my note' : quote ? 'my notes as a note on that passage' : `my note on page ${page}`;
+    lines.push(
+      '',
+      '## Proposed annotation',
+      '',
+      `After answering in the chat, propose an annotation on ${target}: write it into \`${rel(proposal.file)}\`, in section \`## ${proposal.id}\` below ${quote ? 'the quoted line' : 'its heading'} (Edit tool, change nothing else in that file). Once I accept it, it is added to ${where}${quote && bullet ? ' as a sub-bullet below that bullet' : ''}${explanation ? '' : ', marked as written by you'}.${quote && bullet ? ' If I ask you to change, correct or rephrase that bullet instead, write `REPLACE` on its own line followed by the new version of the bullet (in the format below, its sub-bullets included); accepted, it replaces the bullet with its sub-bullets.' : ''}`,
+      '',
+      'Keep it short: only what your answer adds, in German like the explanations (technical terms in English), no repetition of what it annotates, no heading, no italics (italic text is mine). Format: one short line; when it covers several things (terms, cases, steps, examples), that line as a lead-in followed by a Markdown bullet list, one point per bullet. If the answer adds nothing worth keeping, leave the section empty.',
     );
   }
   return lines.join('\n').trimEnd() + '\n';

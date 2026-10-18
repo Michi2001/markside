@@ -276,3 +276,139 @@ export function setDividers(text: string, dividers: Divider[]): string {
   const result = [head, content, tail].filter(Boolean).join('\n\n');
   return tail ? result : result && result + '\n';
 }
+
+// Annotations Claude proposes when asked about a bullet (`paper.pdf.assets/.proposals.md`). The
+// extension writes the heading and the bullet asked about, Claude the annotation below it, or, after
+// a `REPLACE` line, a new version of the bullet:
+//
+//   ## q1760712345 · page 12 · explanation   ← or `note <key>` for a note
+//
+//   > Structured representations: …          ← the bullet (empty: the whole explanation/note)
+//
+//   The annotation, written by Claude.
+export type Proposal = { id: string; page: number; key: string; explanation: boolean; quote: string; body: string; replace: boolean };
+
+const PROPOSAL_HEADING = /^## (q\d+) · page (\d+) · (?:(explanation)|note (\S+))[ \t]*$/;
+const REPLACE = /^REPLACE[ \t]*(?:\r?\n|$)/;
+
+export function parseProposals(text: string): Proposal[] {
+  const proposals: (Proposal & { lines: string[] })[] = [];
+  for (const line of text.split(/\r?\n/)) {
+    const heading = PROPOSAL_HEADING.exec(line);
+    if (heading) {
+      const page = Number(heading[2]);
+      proposals.push({ id: heading[1], page, key: heading[4] ?? pageKey(page), explanation: !!heading[3], quote: '', body: '', replace: false, lines: [] });
+    } else {
+      proposals[proposals.length - 1]?.lines.push(line);
+    }
+  }
+  return proposals.map(({ lines, ...p }) => {
+    const quote = lines.findIndex((l) => l.trim());
+    const hasQuote = quote !== -1 && lines[quote].startsWith('>');
+    const body = lines.slice(hasQuote ? quote + 1 : 0).join('\n').trim();
+    const replace = REPLACE.test(body);
+    return {
+      ...p,
+      quote: hasQuote ? lines[quote].replace(/^>\s?/, '').trim() : '',
+      body: replace ? body.replace(REPLACE, '').trim() : body,
+      replace,
+    };
+  });
+}
+
+export function formatProposal({ id, page, key, explanation, quote, body, replace }: Proposal): string {
+  const heading = `## ${id} · page ${page} · ${explanation ? 'explanation' : `note ${key}`}`;
+  return [heading, quote && `> ${quote.replace(/\s+/g, ' ')}`, body && (replace ? `REPLACE\n${body}` : body)].filter(Boolean).join('\n\n');
+}
+
+export function formatProposals(proposals: Proposal[]): string {
+  return proposals.length > 0 ? proposals.map(formatProposal).join('\n\n') + '\n' : '';
+}
+
+// Accepted annotations start with this sign, so they stay recognizable as Claude's.
+export const AI_MARK = '✦';
+
+const BULLET_LINE = /^(\s*)(?:[-*+]|\d+[.)])\s+/;
+
+// Plain text of a Markdown line, for finding the bullet asked about.
+function plainLine(line: string): string {
+  return line
+    .replace(BULLET_LINE, '')
+    .replace(/<\/?[a-z][^>]*>/gi, '')
+    .replace(/==/g, '')
+    .replace(/!?\[([^\]]*)\]\([^)]*\)/g, '$1')
+    .replace(/[*_`$>#~\\]/g, '')
+    .replace(/\s+/g, ' ')
+    .trim();
+}
+
+// An annotation as list lines (indent 0): its lead text as a bullet with the annotation's own
+// bullets as sub-bullets. `mark`: the lead (without lead text: each top-level bullet) starts with
+// AI_MARK (not inside Claude's explanations, which are Claude's anyway).
+function annotationLines(annotation: string, mark: boolean): string[] {
+  const sign = mark ? `${AI_MARK} ` : '';
+  const lines = annotation.split('\n').filter((l) => l.trim());
+  const first = lines.findIndex((l) => BULLET_LINE.test(l));
+  const lead = (first === -1 ? lines : lines.slice(0, first)).map((l) => l.trim()).join(' ');
+  const list = first === -1 ? [] : lines.slice(first);
+  const base = Math.min(...list.map((l) => l.search(/\S/)));
+  const items = list.map((l) => l.slice(base));
+  if (!lead) {
+    return items.map((l) => l.replace(/^(?:[-*+]|\d+[.)])\s+/, `- ${sign}`));
+  }
+  return [`- ${sign}${lead}`, ...items.map((l) => `  ${l}`)];
+}
+
+// Adds an accepted annotation to a body (explanation or note): as a sub-bullet below the bullet the
+// question was about, else as a bullet after the paragraph quoted or at the end. `replace`: replaces
+// that bullet (with its sub-bullets) or paragraph instead.
+export function insertAnnotation(body: string, quote: string, annotation: string, { mark, replace }: { mark: boolean; replace: boolean }): string {
+  const added = annotationLines(annotation, mark);
+  const lines = body.split('\n');
+  const wanted = plainLine(quote);
+  const index = wanted
+    ? lines.findIndex((l) => {
+        const p = plainLine(l);
+        return p && (p.includes(wanted) || wanted.includes(p));
+      })
+    : -1;
+  if (index === -1) {
+    // After a list as its last item (a blank line would make the list loose).
+    const last = body.trimEnd().split('\n').pop() ?? '';
+    return [body.trimEnd(), added.join('\n')].filter(Boolean).join(BULLET_LINE.test(last) ? '\n' : '\n\n');
+  }
+  const bullet = BULLET_LINE.exec(lines[index]);
+  if (!bullet) {
+    // A paragraph: the annotation goes below it, as first item of a list right after it.
+    let end = index;
+    while (end + 1 < lines.length && lines[end + 1].trim()) {
+      end++;
+    }
+    if (replace) {
+      const text = annotation.trim().split('\n');
+      text[0] = (mark ? `${AI_MARK} ` : '') + text[0];
+      return [...lines.slice(0, index), ...text, ...lines.slice(end + 1)].join('\n');
+    }
+    let next = end + 1;
+    while (next < lines.length && !lines[next].trim()) {
+      next++;
+    }
+    if (next < lines.length && /^(?:[-*+]|\d+[.)])\s/.test(lines[next])) {
+      return [...lines.slice(0, next), ...added, ...lines.slice(next)].join('\n');
+    }
+    // (the next line, if any, is blank)
+    return [...lines.slice(0, end + 1), '', ...added, ...lines.slice(end + 1)].join('\n');
+  }
+  // The bullet's own lines and sublists (everything indented deeper).
+  const indent = bullet[1].length;
+  let end = index;
+  while (end + 1 < lines.length && lines[end + 1].trim() && lines[end + 1].search(/\S/) > indent) {
+    end++;
+  }
+  if (replace) {
+    return [...lines.slice(0, index), ...added.map((l) => bullet[1] + l), ...lines.slice(end + 1)].join('\n');
+  }
+  // Below them, one level in.
+  const child = ' '.repeat(bullet[0].length);
+  return [...lines.slice(0, end + 1), ...added.map((l) => child + l), ...lines.slice(end + 1)].join('\n');
+}

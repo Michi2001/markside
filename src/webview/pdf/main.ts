@@ -1,9 +1,10 @@
-import { Plugin, Selection, type TextSelection } from '@milkdown/kit/prose/state';
+import { type EditorState, Plugin, Selection, type TextSelection } from '@milkdown/kit/prose/state';
 import { $prose } from '@milkdown/kit/utils';
 import type { EditorView } from '@milkdown/kit/prose/view';
+import katex from 'katex';
 import * as pdfjs from 'pdfjs-dist';
 import type { PDFPageProxy, RenderTask } from 'pdfjs-dist';
-import { type Anchor, type Divider, type Rect, type Section, formatAnchor, pageExplanation, pageKey } from '../../sidecar';
+import { type Anchor, type Divider, type Proposal, type Rect, type Section, formatAnchor, pageExplanation, pageKey } from '../../sidecar';
 import { isDrawingOpen } from '../drawing';
 import { type Fold, foldPlugin, getFolds, setFolds, toggleFold } from '../fold';
 import { HIGHLIGHT_COLORS, colorFromStyle } from '../highlight';
@@ -17,6 +18,7 @@ import {
   installShortcuts,
   listItemRange,
   runFormatCommand,
+  selectedDrawings,
   setActiveEditor,
 } from '../noteEditor';
 import './pdf.css';
@@ -37,6 +39,10 @@ const GAP = 24;
 const VIEWER_PADDING = 48 + 24;
 const CARD_GAP = 8;
 const MAX_SCALE = 2;
+const MAX_NOTES_SHARE = 0.6;
+// Zoom limits as page scale (not relative to the fit), so narrow windows zoom in as far as wide ones.
+const MIN_ZOOM_SCALE = 0.1;
+const MAX_ZOOM_SCALE = 8;
 const SNAPSHOT_SCALE = 2.5;
 const RENDER_DELAY_MS = 200;
 const COLORS = ['yellow', 'red', 'green', 'blue'];
@@ -153,6 +159,8 @@ let showExplanations = true;
 // All explanations expanded (lightbulb); pages in `toggled` show the other state.
 let expandExplanations = false;
 const toggled = new Set<number>();
+// Annotations Claude proposed on questions about a bullet, until accepted or rejected.
+let proposals: Proposal[] = [];
 // Pages near the viewport (rendered); others drop their canvas.
 const nearPages = new Set<PageView>();
 // Rows far from the viewport whose cards are laid out once they come near (zooming stays cheap).
@@ -160,11 +168,22 @@ const staleRows = new Set<PageView>();
 
 // ---------- Pages ----------
 
-function fitScale(): number {
+function baseScale(): number {
   const maxWidth = Math.max(...pages.map((p) => p.width));
   const available = viewer.clientWidth - VIEWER_PADDING - GAP;
-  const fit = Math.max(0.3, Math.min(MAX_SCALE, (available - notesWidth) / maxWidth));
-  return fit * zoom;
+  // In narrow windows (split view) a wide notes setting would squeeze the pages to a minimum, so the
+  // notes take at most MAX_NOTES_SHARE of the width at zoom 1.
+  const notes = Math.min(notesWidth, available * MAX_NOTES_SHARE);
+  return Math.max(0.3, Math.min(MAX_SCALE, (available - notes) / maxWidth));
+}
+
+function fitScale(): number {
+  const base = baseScale();
+  return base * clampZoom(zoom, base);
+}
+
+function clampZoom(z: number, base: number): number {
+  return Math.min(MAX_ZOOM_SCALE / base, Math.max(MIN_ZOOM_SCALE / base, z));
 }
 
 // Zoom of the notes column: the user zoom, but when zooming in (in a narrow window, e.g. split view,
@@ -623,6 +642,7 @@ function applySections(sections: Section[], reset: string[] = []): void {
     updateCard(card, section);
     updateClaude(card);
   }
+  applyProposals();
   renderMarks();
   layoutAll();
   const focus = pendingFocus && byKey.get(pendingFocus);
@@ -900,7 +920,82 @@ function applyExplanations(sections: Section[], own: Record<number, string> = ow
   explanations = sections;
   ownExplanations = own;
   cards.forEach(updateClaude);
+  applyProposals();
   layoutAll();
+}
+
+// ---------- Annotations proposed by Claude ----------
+
+// A proposal sits below what the question was about (the explanation or the note) with buttons to
+// add it there (as a sub-bullet of the bullet asked about, a new note on a selected passage; marked
+// as Claude's) or to drop it.
+function applyProposals(): void {
+  document.querySelectorAll('.proposal').forEach((node) => node.remove());
+  for (const p of proposals) {
+    // A passage or mark without a note card yet: shown in the page note.
+    const card = cards.get(p.key) ?? cards.get(pageKey(p.page));
+    const parent = p.explanation ? card?.claude?.el : card?.el;
+    if (!parent) {
+      continue;
+    }
+    const box = el('div', 'proposal', parent);
+    const head = el('div', 'proposal-head', box);
+    el('span', 'proposal-label', head).textContent = p.replace ? 'Change suggested by Claude' : 'Suggested by Claude';
+    if (p.quote) {
+      const quote = el('span', 'proposal-quote', head);
+      quote.textContent = `${p.replace ? 'replaces' : 'on'} „${p.quote}“`;
+      quote.title = p.quote;
+    }
+    // Bullets as • (indented like their Markdown).
+    const text = el('div', 'proposal-text', box);
+    for (const line of p.body.split('\n').filter((l) => l.trim())) {
+      const bullet = /^(\s*)(?:[-*+]|\d+[.)])\s+/.exec(line);
+      const row = el('div', bullet ? 'proposal-bullet' : '', text);
+      row.innerHTML = inlineHtml(bullet ? line.slice(bullet[0].length) : line);
+      row.style.marginLeft = bullet ? `${bullet[1].length / 2 + 1}em` : '';
+    }
+    const actions = el('div', 'proposal-actions', box);
+    const accept = el('button', 'proposal-accept', actions);
+    accept.textContent = p.replace ? 'Replace' : 'Add';
+    accept.title = p.replace ? 'Replace the bullet with this version' : p.quote ? 'Add below the bullet' : 'Add to the end';
+    const reject = el('button', 'proposal-reject', actions);
+    reject.textContent = 'Dismiss';
+    const answer = (type: 'acceptProposal' | 'rejectProposal') => (e: MouseEvent) => {
+      e.preventDefault();
+      e.stopPropagation();
+      proposals = proposals.filter((q) => q !== p);
+      box.remove();
+      post({ type, id: p.id });
+    };
+    accept.addEventListener('mousedown', answer('acceptProposal'));
+    reject.addEventListener('mousedown', answer('rejectProposal'));
+  }
+}
+
+// A line of a proposal as HTML: math via KaTeX, bold, italics and code; everything else as text.
+function inlineHtml(markdown: string): string {
+  const escape = (t: string) => t.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;');
+  return markdown
+    .split(/(\$\$[^$]+\$\$|\$[^$\n]+\$|`[^`]+`)/)
+    .map((part, i) => {
+      if (i % 2 === 0) {
+        return escape(part)
+          .replace(/\*\*([^*]+)\*\*/g, '<strong>$1</strong>')
+          .replace(/(^|[^*])\*([^*]+)\*/g, '$1<em>$2</em>');
+      }
+      if (part.startsWith('`')) {
+        return `<code>${escape(part.slice(1, -1))}</code>`;
+      }
+      const display = part.startsWith('$$');
+      return katex.renderToString(part.slice(display ? 2 : 1, display ? -2 : -1), { throwOnError: false });
+    })
+    .join('');
+}
+
+// What Alt+K in an editor asks about: the selected text, else the bullet at the cursor.
+function questionText(state: EditorState): string | undefined {
+  const { from, to } = state.selection.empty ? (listItemRange(state) ?? state.selection) : state.selection;
+  return state.doc.textBetween(from, to, ' ', ' ').replace(/\s+/g, ' ').trim() || undefined;
 }
 
 // ---------- Layout of the margin ----------
@@ -1389,7 +1484,8 @@ function askClaude(): void {
   const current = pdfSelection();
   if (current) {
     const quote = current.range.toString().replace(/\s+/g, ' ').trim();
-    post({ type: 'askClaude', page: current.pv.num, quote, rects: selectionRects(current.range, current.pv) });
+    // Color of the note it may get from Claude's proposal (random, like Alt+A).
+    post({ type: 'askClaude', page: current.pv.num, quote, rects: selectionRects(current.range, current.pv), color: randomColor(current.pv.num) });
     return;
   }
   if (hoveredCard) {
@@ -1518,7 +1614,7 @@ window.addEventListener(
       return;
     }
     e.preventDefault();
-    zoom = Math.min(4, Math.max(0.25, zoom * Math.exp(-e.deltaY / 200)));
+    zoom = clampZoom(zoom * Math.exp(-e.deltaY / 200), baseScale());
     scheduleScale();
   },
   { passive: false },
@@ -1639,22 +1735,26 @@ window.addEventListener(
       }
       return;
     }
-    // Alt+K in a card without selected text asks Claude about the whole note (with selected text or
-    // the cursor in a bullet it mentions those lines of the notes file, see installShortcuts).
+    // Alt+K in a card asks Claude about it; Claude then proposes an annotation (`applyProposals`).
     const focusedCard = [...cards.values()].find((c) => c.el === focused);
-    // Alt+K in Claude's explanation asks about the selected passage, else the whole explanation.
+    // Alt+K in Claude's explanation asks about the selected passage or the bullet at the cursor, else
+    // the whole explanation.
     if (e.code === 'KeyK' && focusedCard && inClaude) {
       e.preventDefault();
       e.stopImmediatePropagation();
-      const quote = window.getSelection()?.toString().replace(/\s+/g, ' ').trim();
-      post({ type: 'askClaude', page: focusedCard.section.page, quote: quote || undefined, explanation: true });
+      const state = focusedCard.claude?.editor?.view().state;
+      const quote = state ? questionText(state) : window.getSelection()?.toString().replace(/\s+/g, ' ').trim() || undefined;
+      post({ type: 'askClaude', page: focusedCard.section.page, quote, explanation: true });
       return;
     }
+    // Alt+K in a note asks about the selected text or the bullet at the cursor, else the whole note;
+    // selected drawings go along as PNG.
     const cardState = focusedCard?.editor?.view().state;
-    if (e.code === 'KeyK' && focusedCard && cardState?.selection.empty && !listItemRange(cardState)) {
+    if (e.code === 'KeyK' && focusedCard && cardState) {
       e.preventDefault();
       e.stopImmediatePropagation();
-      post({ type: 'askClaude', page: focusedCard.section.page, key: focusedCard.key, note: true });
+      const ask = { type: 'askClaude', page: focusedCard.section.page, key: focusedCard.key, note: true, quote: questionText(cardState) };
+      selectedDrawings(cardState).then((drawings) => post({ ...ask, drawings }));
       return;
     }
     // Alt+K outside the cards asks Claude about the selected text, the note card or mark under the
@@ -1700,6 +1800,7 @@ window.addEventListener('message', async (event) => {
       showExplanations = msg.showExplanations;
       expandExplanations = msg.expandExplanations;
       folds = msg.folds;
+      proposals = msg.proposals;
       await loadPdf(msg.pdfUrl);
       break;
     case 'notes':
@@ -1714,6 +1815,10 @@ window.addEventListener('message', async (event) => {
       break;
     case 'explanations':
       applyExplanations(msg.sections, msg.own);
+      break;
+    case 'proposals':
+      proposals = msg.proposals;
+      applyProposals();
       break;
     case 'showExplanations':
       showExplanations = msg.show;

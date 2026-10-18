@@ -316,3 +316,8 @@ body[data-theme='dark'] {
   background: none;
   border: none;
 }
+
+/* Annotations accepted from Claude (starting with ✦): Claude's violet (`--explain` in pdf.css). */
+.milkdown .ProseMirror .mdlive-ai {
+  color: color-mix(in srgb, #8a7ad6 80%, currentColor);
+}

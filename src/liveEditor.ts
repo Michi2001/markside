@@ -1,9 +1,10 @@
 import * as vscode from 'vscode';
-import { adoptAssets, cleanupAssets, loadFolds, saveFolds, saveImage } from './assets';
+import { adoptAssets, claudeDrawingLines, cleanupAssets, loadFolds, saveFolds, saveImage, writeClaudeContext } from './assets';
 import { preserveSource } from './preserve';
 import { DrawingServer, type DrawingFile, type DrawingTarget, getDrawingDevice } from './drawingServer';
 import type { FontSizes } from './fontSizes';
 import type { Fold } from './webview/fold';
+import type { ClaudeDrawing } from './webview/noteEditor';
 
 const CLAUDE_MENTION_COMMAND = 'claude-vscode.insertAtMention';
 
@@ -25,7 +26,7 @@ type WebviewMessage =
   | { type: 'ready' }
   | { type: 'edit'; text: string }
   | { type: 'saveImage'; id: number; name: string; mime: string; data: string }
-  | { type: 'selection'; text: string }
+  | { type: 'selection'; text: string; drawings?: ClaudeDrawing[] }
   | { type: 'folds'; folds: Fold[] }
   | { type: 'rename'; title: string }
   | { type: 'drawRemote'; id: number; drawing: unknown; src: string | null };
@@ -176,7 +177,12 @@ export class LiveEditorProvider implements vscode.CustomTextEditorProvider {
           // document would prompt to save, so flush pending edits and save first.
           await editQueue;
           await document.save();
-          await sendSelectionToClaude(document, panel, msg.text);
+          if (msg.drawings?.length) {
+            // Claude can't see a drawing from its link (an SVG of strokes), so it gets a context file naming PNGs.
+            await sendSelectionToClaude(await vscode.workspace.openTextDocument(await drawingContext(document, msg.text, msg.drawings)), panel, '');
+          } else {
+            await sendSelectionToClaude(document, panel, msg.text);
+          }
           break;
       }
     });
@@ -345,6 +351,18 @@ function findSourceRange(document: vscode.TextDocument, selected: string): vscod
     }
   }
   return new vscode.Range(startLine, 0, endLine, document.lineAt(endLine).text.length);
+}
+
+// Context for a question about drawings in a note: the note, the selected text and the drawings as PNG.
+async function drawingContext(document: vscode.TextDocument, selected: string, drawings: ClaudeDrawing[]): Promise<vscode.Uri> {
+  const lines = [`# Question about my note \`${vscode.workspace.asRelativePath(document.uri, false)}\``];
+  const range = findSourceRange(document, selected);
+  if (selected.trim()) {
+    const where = range ? ` (lines ${range.start.line + 1}–${range.end.line + 1})` : '';
+    lines.push('', `## Selected text${where}`, '', ...selected.trim().split('\n').map((line) => `> ${line}`));
+  }
+  lines.push(...(await claudeDrawingLines(document.uri, drawings)));
+  return writeClaudeContext(document.uri, lines.join('\n') + '\n');
 }
 
 // The Claude extension only reads selections from real text editors, so we briefly open one,

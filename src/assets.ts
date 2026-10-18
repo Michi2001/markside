@@ -11,7 +11,11 @@ const ASSET_REF = /(?<=[("'<])([^\s/()"'<>]+)\.assets\/([\w.-]+)/g;
 const FOLDS_FILE = '.folds.json';
 // Context for a question to Claude about a PDF (Alt+K), rewritten on every question.
 const CLAUDE_FILE = '.claude.md';
-const KEEP_FILES = [FOLDS_FILE, CLAUDE_FILE];
+// Annotations Claude proposes on a question about a bullet (accepted or rejected in the PDF view).
+const PROPOSALS_FILE = '.proposals.md';
+const KEEP_FILES = [FOLDS_FILE, CLAUDE_FILE, PROPOSALS_FILE];
+// Drawings asked about with Alt+K, as PNG for Claude (`.claude-drawing-1.png`, …), rewritten on every question.
+const CLAUDE_DRAWING = /^\.claude-drawing-\d+\.png$/;
 
 const MIME_EXTENSIONS: Record<string, string> = {
   'image/png': '.png',
@@ -87,6 +91,26 @@ export async function writeClaudeContext(note: vscode.Uri, text: string): Promis
   return file;
 }
 
+// Saves the drawings asked about as PNG into the note's assets and returns the context lines naming them.
+export async function claudeDrawingLines(note: vscode.Uri, drawings: { src: string; png: string }[]): Promise<string[]> {
+  if (drawings.length === 0) {
+    return [];
+  }
+  const dir = assetsDir(note);
+  await fs.createDirectory(dir);
+  const lines = ['', drawings.length > 1 ? '## Drawings in question' : '## Drawing in question', '', 'My handwritten drawing, rendered as PNG; look at it with the Read tool:', ''];
+  for (const [i, drawing] of drawings.entries()) {
+    const file = vscode.Uri.joinPath(dir, `.claude-drawing-${i + 1}.png`);
+    await fs.writeFile(file, Buffer.from(drawing.png, 'base64'));
+    lines.push(`- \`${vscode.workspace.asRelativePath(file, false)}\` (linked in the note as \`${drawing.src}\`)`);
+  }
+  return lines;
+}
+
+export function proposalsUri(note: vscode.Uri): vscode.Uri {
+  return vscode.Uri.joinPath(assetsDir(note), PROPOSALS_FILE);
+}
+
 // Collapsed headings: a list for a note, a list per card (keyed by section) for PDF notes.
 type Folds = Fold[] | Record<string, Fold[]>;
 
@@ -158,7 +182,7 @@ export async function cleanupAssets(document: vscode.TextDocument): Promise<void
   // Unsaved text counts too, so an image pasted right before closing survives until the save lands.
   const text = (await readText(document.uri)) + document.getText();
   for (const [name, type] of await fs.readDirectory(dir)) {
-    if (type === vscode.FileType.File && !KEEP_FILES.includes(name) && !text.includes(name)) {
+    if (type === vscode.FileType.File && !KEEP_FILES.includes(name) && !CLAUDE_DRAWING.test(name) && !text.includes(name)) {
       await fs.delete(vscode.Uri.joinPath(dir, name), { useTrash: true });
     }
   }

@@ -9,6 +9,8 @@ const IMAGE_DRAWING_SUFFIX = '.image.drawing.svg';
 
 // Empty space kept around the strokes when cropping on save.
 const PADDING = 12;
+// Longest side of a drawing rendered as PNG for Claude (Alt+K).
+const MAX_PNG_SIZE = 2000;
 // Margin shown above/left of an existing drawing when it is reopened.
 const VIEW_MARGIN = 48;
 const GRID = 20;
@@ -113,13 +115,35 @@ export function parseDrawing(svg: string): Drawing {
     console.warn('No drawing data in SVG');
     return { strokes: [] };
   }
-  const { strokes, image } = JSON.parse(json);
+  const { strokes, image, gridShift = [0, 0] } = JSON.parse(json);
   const href = /<image id="mdlive-background"[^>]*\shref="([^"]*)"/.exec(svg)?.[1];
-  return { strokes, ...(image && href ? { image: { ...image, href } } : {}) };
+  // Undoes the crop's shift modulo the grid, so the strokes sit on the grid as when they were drawn.
+  const [sx, sy] = gridShift;
+  return {
+    strokes: strokes.map((s: Stroke) => translate(s, -sx, -sy)),
+    ...(image && href ? { image: { ...image, href, x: image.x - sx, y: image.y - sy } } : {}),
+  };
 }
 
 export async function loadDrawing(url: string): Promise<Drawing> {
   return parseDrawing(await (await fetch(url)).text());
+}
+
+// A drawing as PNG (base64) on white, for Claude: the ink is stored dark, a background image is embedded.
+export async function drawingPng(url: string): Promise<string> {
+  const svg = new Blob([await (await fetch(url)).text()], { type: 'image/svg+xml' });
+  const img = new Image();
+  img.src = await blobToDataUrl(svg);
+  await img.decode();
+  const scale = Math.min(2, MAX_PNG_SIZE / Math.max(img.naturalWidth, img.naturalHeight));
+  const canvas = document.createElement('canvas');
+  canvas.width = Math.round(img.naturalWidth * scale);
+  canvas.height = Math.round(img.naturalHeight * scale);
+  const ctx = canvas.getContext('2d')!;
+  ctx.fillStyle = '#fff';
+  ctx.fillRect(0, 0, canvas.width, canvas.height);
+  ctx.drawImage(img, 0, 0, canvas.width, canvas.height);
+  return canvas.toDataURL('image/png').split(',')[1];
 }
 
 export function blobToDataUrl(blob: Blob): Promise<string> {
@@ -197,6 +221,8 @@ function toSvg(strokes: Stroke[], image?: Background): string {
       };
   const pad = inside ? 0 : PADDING;
   const moved = paintOrder(strokes).map((s) => translate(s, pad - box.x1, pad - box.y1));
+  const phase = (v: number): number => Number((((v % GRID) + GRID) % GRID).toFixed(1));
+  const gridShift = [phase(pad - box.x1), phase(pad - box.y1)];
   const placed = image && { x: Number((image.x + pad - box.x1).toFixed(1)), y: Number((image.y + pad - box.y1).toFixed(1)), width: image.width, height: image.height, nodeWidth: image.nodeWidth };
   const width = Math.ceil(box.x2 - box.x1 + 2 * pad);
   const height = Math.ceil(box.y2 - box.y1 + 2 * pad);
@@ -208,7 +234,7 @@ function toSvg(strokes: Stroke[], image?: Background): string {
     })
     .join('\n');
   return `<svg xmlns="http://www.w3.org/2000/svg" width="${width}" height="${height}" viewBox="0 0 ${width} ${height}">
-<metadata id="mdlive-drawing">${JSON.stringify({ version: 1, strokes: moved, ...(placed ? { image: placed } : {}) })}</metadata>
+<metadata id="mdlive-drawing">${JSON.stringify({ version: 1, strokes: moved, gridShift, ...(placed ? { image: placed } : {}) })}</metadata>
 ${placed ? `${inside ? '' : '<rect width="100%" height="100%" fill="#fff"/>\n'}<image id="mdlive-background" x="${placed.x}" y="${placed.y}" width="${placed.width}" height="${placed.height}" preserveAspectRatio="none" href="${image!.href}"/>\n` : ''}${paths}
 </svg>
 `;
@@ -305,6 +331,24 @@ function saveColors(kind: Ink, colors: string[]): void {
   }
 }
 
+// Strokes copied with the lasso, kept across drawings (and reloads of the iPad page) on this device.
+function loadClipboard(): Stroke[] {
+  try {
+    const saved = JSON.parse(localStorage.getItem('mdlive-drawing-clipboard') ?? 'null');
+    return Array.isArray(saved) ? saved : [];
+  } catch {
+    return [];
+  }
+}
+
+function saveClipboard(strokes: Stroke[]): void {
+  try {
+    localStorage.setItem('mdlive-drawing-clipboard', JSON.stringify(strokes));
+  } catch {
+    console.warn('Could not save copied strokes');
+  }
+}
+
 function insidePolygon(x: number, y: number, polygon: number[][]): boolean {
   let inside = false;
   for (let i = 0, j = polygon.length - 1; i < polygon.length; j = i++) {
@@ -327,6 +371,10 @@ const ICONS = {
   redo: svgIcon('<path d="m15 14 5-5-5-5"/><path d="M20 9H9.5a5.5 5.5 0 0 0 0 11H13"/>'),
   lasso: svgIcon(
     '<path d="M4.5 15.5C3 14.2 2 12.6 2 10.8 2 6.5 6.5 3 12 3s10 3.5 10 7.8-4.5 7.8-10 7.8c-1.6 0-3.2-.3-4.5-.8" stroke-dasharray="3 2.5"/><circle cx="5.5" cy="17.5" r="2"/><path d="M5.5 19.5c0 1.2.5 2 1.5 2.5"/>',
+  ),
+  copy: svgIcon('<rect x="8" y="8" width="13" height="13" rx="2"/><path d="M16 8V5a2 2 0 0 0-2-2H5a2 2 0 0 0-2 2v9a2 2 0 0 0 2 2h3"/>'),
+  paste: svgIcon(
+    '<path d="M9 4H6a2 2 0 0 0-2 2v13a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V6a2 2 0 0 0-2-2h-3"/><rect x="9" y="2" width="6" height="4" rx="1"/><path d="M9 13h6M12 10v6"/>',
   ),
   space: svgIcon('<path d="M12 3v18"/><path d="m8 7 4-4 4 4"/><path d="m8 17 4 4 4-4"/><path d="M3 12h3M18 12h3"/>'),
   eraser: svgIcon(
@@ -386,6 +434,7 @@ export function openDrawingEditor(
   // Strokes picked with the lasso (or below the space-tool line); `offset` previews a move.
   let selection = new Set<Stroke>();
   let offset = { dx: 0, dy: 0 };
+  let clipboard = loadClipboard();
   // Drawn on top while a gesture runs: the stroke being drawn, the lasso loop, the space-tool line.
   let preview: { stroke?: Stroke; lasso?: number[][]; spaceY?: number; eraser?: number[] } = {};
   let gesture: Gesture | null = null;
@@ -443,6 +492,8 @@ export function openDrawingEditor(
   };
 
   const redraw = (): void => {
+    copyButton.disabled = selection.size === 0;
+    pasteButton.disabled = clipboard.length === 0;
     const dpr = window.devicePixelRatio || 1;
     const { width, height } = stage.getBoundingClientRect();
     ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
@@ -688,6 +739,7 @@ export function openDrawingEditor(
   const finish = (drawing: Drawing | null): void => {
     open = false;
     observer.disconnect();
+    window.removeEventListener('keydown', onKey);
     overlay.remove();
     resolve(drawing);
   };
@@ -716,6 +768,44 @@ export function openDrawingEditor(
       redraw();
     }
   };
+
+  const copySelection = (): void => {
+    if (selection.size > 0) {
+      clipboard = strokes.filter((s) => selection.has(s));
+      saveClipboard(clipboard);
+      redraw();
+    }
+  };
+  // Pastes the copied strokes centered in the view and selects them with the lasso, ready to move.
+  const paste = (): void => {
+    if (clipboard.length === 0) {
+      return;
+    }
+    const { width, height } = stage.getBoundingClientRect();
+    const box = bounds(clipboard);
+    const dx = viewX + width / zoom / 2 - (box.x1 + box.x2) / 2;
+    const dy = viewY + height / zoom / 2 - (box.y1 + box.y2) / 2;
+    const pasted = clipboard.map((s) => translate(s, dx, dy));
+    commit([...strokes, ...pasted]);
+    tool = 'lasso';
+    updateToolbar();
+    clearSelection();
+    selection = new Set(pasted);
+    redraw();
+  };
+  const copyButton = button('mdlive-tool', 'Copy selected strokes (Cmd+C)', ICONS.copy, copySelection);
+  const pasteButton = button('mdlive-tool', 'Paste copied strokes (Cmd+V)', ICONS.paste, paste);
+  const onKey = (e: KeyboardEvent): void => {
+    if (!(e.metaKey || e.ctrlKey) || e.altKey || e.shiftKey) {
+      return;
+    }
+    const key = e.key.toLowerCase();
+    if (key === 'c' || key === 'v') {
+      e.preventDefault();
+      (key === 'c' ? copySelection : paste)();
+    }
+  };
+  window.addEventListener('keydown', onKey);
 
   const spacer = document.createElement('div');
   spacer.className = 'mdlive-spacer';
@@ -852,6 +942,8 @@ export function openDrawingEditor(
     button('mdlive-tool', 'Redo', ICONS.redo, () => history(redoStack, undoStack)),
     separator(),
     toolButton('mdlive-tool', 'Lasso: select and move strokes', ICONS.lasso, () => tool === 'lasso', () => (tool = 'lasso')),
+    copyButton,
+    pasteButton,
     toolButton('mdlive-tool', 'Insert/remove space: drag everything below up or down', ICONS.space, () => tool === 'space', () => (tool = 'space')),
     eraserButton,
     separator(),
