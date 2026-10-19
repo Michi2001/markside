@@ -1,8 +1,8 @@
 # Markside
 
-**Live Markdown editing and PDF margin notes for VS Code, with handwriting and Claude Code integration.**
+**Markside turns VS Code into a note-taking app for studying.**
 
-Markside turns VS Code into a note-taking app for studying: Markdown notes are edited in their rendered form (like Obsidian or Typora), and lecture slides open as PDFs with always-visible notes next to every page. Everything is stored as plain Markdown next to your files, so notes stay readable on GitHub, in Obsidian or in any text editor.
+Live Markdown editing and PDF margin notes, with handwriting and Claude Code integration. Markdown notes are edited in their rendered form (like Obsidian or Typora), and lecture slides open as PDFs with always-visible notes next to every page. Everything is stored as plain Markdown next to your files, so notes stay readable on GitHub, in Obsidian or in any text editor.
 
 > **Status:** personal project, work in progress. Developed and tested on macOS only; the iPad/Sidecar features require a Mac. File formats may still change.
 
