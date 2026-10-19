@@ -1,14 +1,28 @@
 {
-  "name": "markdown-live-editor",
-  "displayName": "Markdown Live Editor",
-  "description": "Obsidian-like live preview editing for Markdown files, with image paste and Claude selection hand-off.",
+  "name": "markside",
+  "displayName": "Markside – Live Markdown Editor & PDF Notes",
+  "description": "Obsidian-style live Markdown editing and PDF margin notes, with handwriting and Claude Code integration.",
   "version": "0.1.0",
   "publisher": "michael",
   "license": "MIT",
+  "keywords": [
+    "markdown",
+    "wysiwyg",
+    "live preview",
+    "pdf",
+    "annotation",
+    "notes",
+    "handwriting",
+    "obsidian",
+    "typora",
+    "claude"
+  ],
   "engines": {
     "vscode": "^1.95.0"
   },
   "categories": [
+    "Notebooks",
+    "Visualization",
     "Other"
   ],
   "main": "./dist/extension.js",
@@ -16,7 +30,7 @@
     "customEditors": [
       {
         "viewType": "mdLive.editor",
-        "displayName": "Markdown Live Editor",
+        "displayName": "Markside",
         "selector": [
           {
             "filenamePattern": "*.md"
@@ -39,107 +53,107 @@
       {
         "command": "mdLive.open",
         "title": "Open in Live Editor",
-        "category": "Markdown Live",
+        "category": "Markside",
         "icon": "$(edit)"
       },
       {
         "command": "mdLive.openAsText",
         "title": "Open as Raw Markdown",
-        "category": "Markdown Live",
+        "category": "Markside",
         "icon": "$(code)"
       },
       {
         "command": "mdLive.sendSelectionToClaude",
         "title": "Send Selection to Claude (Alt+K)",
-        "category": "Markdown Live",
+        "category": "Markside",
         "icon": "$(sparkle)"
       },
       {
         "command": "mdLive.insertDrawing",
         "title": "Insert Handwriting (Alt+D)",
-        "category": "Markdown Live",
+        "category": "Markside",
         "icon": "$(pencil)"
       },
       {
         "command": "mdLive.showIpadUrl",
         "title": "Draw on iPad: Show Address",
-        "category": "Markdown Live"
+        "category": "Markside"
       },
       {
         "command": "mdLive.renewIpadUrl",
         "title": "Draw on iPad: New Address (invalidate the old one)",
-        "category": "Markdown Live"
+        "category": "Markside"
       },
       {
         "command": "mdLive.chooseDrawingDevice",
         "title": "Choose Drawing Device",
-        "category": "Markdown Live",
+        "category": "Markside",
         "icon": "$(device-mobile)"
       },
       {
         "command": "mdLive.chooseDrawingDevice.mac",
         "title": "Choose Drawing Device",
-        "category": "Markdown Live",
+        "category": "Markside",
         "icon": "$(device-desktop)"
       },
       {
         "command": "mdLive.chooseDrawingDevice.ipad",
         "title": "Choose Drawing Device",
-        "category": "Markdown Live",
+        "category": "Markside",
         "icon": "$(device-mobile)"
       },
       {
         "command": "mdLive.chooseDrawingDevice.ipadUsb",
         "title": "Choose Drawing Device",
-        "category": "Markdown Live",
+        "category": "Markside",
         "icon": "$(plug)"
       },
       {
         "command": "mdLive.chooseDrawingDevice.sidecar",
         "title": "Choose Drawing Device",
-        "category": "Markdown Live",
+        "category": "Markside",
         "icon": "$(screen-full)"
       },
       {
         "command": "mdLive.toggleExplanations",
         "title": "Collapse Claude's Explanations",
-        "category": "Markdown Live",
+        "category": "Markside",
         "icon": "$(lightbulb)"
       },
       {
         "command": "mdLive.toggleExplanations.off",
         "title": "Expand Claude's Explanations",
-        "category": "Markdown Live",
+        "category": "Markside",
         "icon": "$(lightbulb-empty)"
       },
       {
         "command": "mdLive.dividers",
         "title": "Lecture Ends and Sections…",
-        "category": "Markdown Live",
+        "category": "Markside",
         "icon": "$(milestone)"
       },
       {
         "command": "mdLive.explainSlides",
         "title": "Explain Slides with Claude…",
-        "category": "Markdown Live",
+        "category": "Markside",
         "icon": "$(sparkle)"
       },
       {
         "command": "mdLive.explainSlides.running",
         "title": "Claude Is Explaining Slides… (Stop)",
-        "category": "Markdown Live",
+        "category": "Markside",
         "icon": "$(loading~spin)"
       },
       {
         "command": "mdLive.chooseTheme",
         "title": "Choose Color Mode",
-        "category": "Markdown Live",
+        "category": "Markside",
         "icon": "$(color-mode)"
       },
       {
         "command": "mdLive.chooseFontSize",
         "title": "Choose Font Size",
-        "category": "Markdown Live",
+        "category": "Markside",
         "icon": "$(text-size)"
       }
     ],
@@ -159,6 +173,11 @@
           "command": "mdLive.sendSelectionToClaude",
           "when": "activeCustomEditorId == mdLive.editor",
           "group": "navigation@2"
+        },
+        {
+          "command": "mdLive.insertDrawing",
+          "when": "activeCustomEditorId == mdLive.editor",
+          "group": "navigation@3"
         },
         {
           "command": "mdLive.chooseDrawingDevice.mac",
@@ -284,7 +303,7 @@
       ]
     },
     "configuration": {
-      "title": "Markdown Live Editor",
+      "title": "Markside",
       "properties": {
         "mdLive.theme": {
           "type": "string",
@@ -299,7 +318,7 @@
             "Always use a light editor.",
             "Always use a dark editor."
           ],
-          "description": "Color mode of the Markdown Live Editor."
+          "description": "Color mode of Markside."
         },
         "mdLive.fontSize": {
           "type": "number",
@@ -319,6 +338,11 @@
           "type": "boolean",
           "default": true,
           "description": "Show Claude's explanations of the slides (paper.pdf.claude.md, written by the explain-slides skill) next to PDFs."
+        },
+        "mdLive.claudeLanguage": {
+          "type": "string",
+          "default": "English",
+          "description": "Language of Claude's slide explanations and proposed annotations in the PDF view, e.g. 'English' or 'German'. Technical terms stay in English."
         },
         "mdLive.pdfExplanationsExpanded": {
           "type": "boolean",
@@ -359,7 +383,7 @@
     "build": "node esbuild.mjs",
     "vscode:prepublish": "npm run build",
     "watch": "node esbuild.mjs --watch",
-    "package": "npx @vscode/vsce package --no-dependencies"
+    "package": "npx @vscode/vsce package --no-dependencies --no-rewrite-relative-links"
   },
   "devDependencies": {
     "@types/mdast": "^4.0.4",

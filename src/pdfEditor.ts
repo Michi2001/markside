@@ -2,7 +2,7 @@ import * as path from 'path';
 import * as vscode from 'vscode';
 import { claudeDrawingLines, cleanupAssets, explanationsUri, loadFolds, notesUri, proposalsUri, saveFolds, saveImage, writeClaudeContext } from './assets';
 import { DrawingServer, getDrawingDevice } from './drawingServer';
-import { type PdfView, explainSlides, isExplaining } from './explain';
+import { type PdfView, explainSlides, getClaudeLanguage, isExplaining } from './explain';
 import type { FontSizes } from './fontSizes';
 import { applyAdopted, applyMinimalEdit, getTheme, queueEdit, sendSelectionToClaude } from './liveEditor';
 import { preserveSource } from './preserve';
@@ -693,7 +693,7 @@ function claudeContext(
       '',
       `After answering in the chat, propose an annotation on ${target}: write it into \`${rel(proposal.file)}\`, in section \`## ${proposal.id}\` below ${quote ? 'the quoted line' : 'its heading'} (Edit tool, change nothing else in that file). Once I accept it, it is added to ${where}${quote && bullet ? ' as a sub-bullet below that bullet' : ''}${explanation ? '' : ', marked as written by you'}.${quote && bullet ? ' If I ask you to change, correct or rephrase that bullet instead, write `REPLACE` on its own line followed by the new version of the bullet (in the format below, its sub-bullets included); accepted, it replaces the bullet with its sub-bullets.' : ''}`,
       '',
-      'Keep it short: only what your answer adds, in German like the explanations (technical terms in English), no repetition of what it annotates, no heading, no italics (italic text is mine). Format: one short line; when it covers several things (terms, cases, steps, examples), that line as a lead-in followed by a Markdown bullet list, one point per bullet. If the answer adds nothing worth keeping, leave the section empty.',
+      `Keep it short: only what your answer adds, in ${getClaudeLanguage()}${getClaudeLanguage() === 'English' ? '' : ' (technical terms in English)'}, no repetition of what it annotates, no heading, no italics (italic text is mine). Format: one short line; when it covers several things (terms, cases, steps, examples), that line as a lead-in followed by a Markdown bullet list, one point per bullet. If the answer adds nothing worth keeping, leave the section empty.`,
     );
   }
   return lines.join('\n').trimEnd() + '\n';

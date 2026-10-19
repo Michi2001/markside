@@ -1,76 +1,155 @@
-# Markdown Live Editor
+# Markside
 
-Bearbeite Markdown-Dateien direkt in der gerenderten Ansicht (ähnlich Obsidian/Typora), in einem einzigen Tab.
+**Live Markdown editing and PDF margin notes for VS Code, with handwriting and Claude Code integration.**
 
-## Benutzung
+Markside turns VS Code into a note-taking app for studying: Markdown notes are edited in their rendered form (like Obsidian or Typora), and lecture slides open as PDFs with always-visible notes next to every page. Everything is stored as plain Markdown next to your files, so notes stay readable on GitHub, in Obsidian or in any text editor.
 
-- **Live-Editor öffnen:** In einer `.md`-Datei oben rechts auf das Stift-Symbol klicken (oder Command Palette → „Markdown Live: Open in Live Editor").
-- **Zurück zum Raw-Markdown:** Code-Symbol `</>` oben rechts.
-- **Titel:** Über der Notiz steht wie in Obsidian der Dateiname als Titel (Unterstriche als Leerzeichen). Titel anklicken und ändern benennt die Datei um, sobald man ihn verlässt (`Enter` springt an den Anfang der Notiz, `Esc` verwirft die Änderung). Leerzeichen werden im Dateinamen zu `_`, in Dateinamen unerlaubte Zeichen (`/ : * ? " < > |`) zu `-`. Gibt es den Namen schon, bleibt der alte. Der `.assets`-Ordner zieht mit um. Beim Scrollen bleibt der Titel als schmale Leiste oben sichtbar; Klick darauf springt zurück zum Titel.
-- **Bilder:** Screenshot/Bild mit `Cmd+V` einfügen oder per Drag & Drop (aus dem Finder mit gedrückter `Shift`-Taste) hineinziehen. Das Bild wird im Ordner `<notiz>.assets/` neben der Notiz gespeichert und relativ verlinkt. Beim Schließen der Notiz kommen nicht mehr verlinkte Bilder in den Papierkorb. Wird die Notiz in VS Code umbenannt, verschoben, kopiert oder gelöscht, zieht der Ordner mit bzw. wird mitkopiert (im Finder Notiz und Ordner zusammen verschieben). Ausblenden im Explorer (auch die Notizen `<datei>.pdf.md` und Claudes Erklärungen `<datei>.pdf.claude.md` zu PDFs): `"files.exclude": { "**/*.assets": { "when": "$(basename).md" }, "**/*.pdf.md": { "when": "$(basename)" }, "**/*.pdf.claude.md": true }`.
-- **Bildgröße ändern:** Mit der Maus über ein Bild fahren und an einer der vier Ecken ziehen (wie in OneNote); die Breite wird live in Pixeln angezeigt. Skalierte Bilder werden als `<img src="…" width="…">` gespeichert, das verstehen auch die VS-Code-Vorschau, GitHub und Obsidian.
-- **Handschrift:** `Alt+D`, Stift-Symbol oben rechts oder `/` → „Handwriting“ öffnet eine Zeichenfläche (z. B. mit dem iPad als Sidecar-Display und Apple Pencil). Die Fläche (Karopapier) ist unendlich groß: verschieben am Mac mit Trackpad/Mausrad, am iPad mit einem Finger; zoomen mit zwei Fingern (iPad, Trackpad) bzw. `Ctrl`+Mausrad. Zoomen ändert nur die Ansicht, nicht die gespeicherte Größe. Beim Speichern wird eng um das Gezeichnete zugeschnitten, nur das landet in der Notiz. Leiste wie in OneNote: Undo/Redo, Lasso (Striche umkreisen, dann in der Auswahl ziehen zum Verschieben), Platz einfügen/entfernen (aufsetzen und nach oben/unten ziehen: alles darunter wandert mit), Radierer (nochmal antippen: Strichradierer löscht ganze Striche, Punktradierer nur das Überstrichene), 4 Stifte und 3 Textmarker (liegen unter der Schrift; den gewählten nochmal antippen: Farbe aus der Palette oder über den Regenbogen-Kreis frei wählen – Farben werden gemerkt), Formen wie in OneNote (Linie, Pfeil, Doppelpfeil, Rechteck, Ellipse, Kreis, Dreiecke, Raute, Parallelogramm, Trapez, Koordinatensysteme; aufziehen von Ecke zu Ecke, in aktueller Stiftfarbe/-stärke) und 5 Dicken-Stufen von fein bis sehr fett direkt neben den Stiften (Standard: dünn); die Dicke gilt für alle Stifte bzw. alle Textmarker. „Done“ speichert, „Cancel“ verwirft. Gespeichert wird als `<notiz>.assets/<zeit>.drawing.svg`, mit den Strichdaten in der SVG eingebettet: Die Zeichnung wird überall wie ein normales Bild angezeigt und lässt sich im Live-Editor per **Doppelklick** weiterbearbeiten. Die Tinte ist dunkel gespeichert und wird in dunklen Themes invertiert angezeigt (andere Programme zeigen sie im Dark Mode dunkel an).
-- **In Bilder zeichnen:** Doppelklick auf ein Bild der Notiz öffnet die Zeichenfläche (am Mac oder am iPad, je nach `mdLive.drawingDevice`) mit dem Bild als festem Hintergrund in der Größe, in der es in der Notiz angezeigt wird. Gezeichnet werden kann ins Bild und auf der weißen Fläche drumherum. „Done“ ersetzt das Bild durch `<zeit>.image.drawing.svg` (Bild eingebettet, im Dark Mode nicht invertiert; weißer Rand nur, wenn über das Bild hinaus gezeichnet wurde); per Doppelklick weiter bearbeitbar. Werden alle Striche wieder entfernt, ersetzt „Done“ die Zeichnung wieder durch das Originalbild (ohne weißen Rand, in der ursprünglichen Breite). Das Originalbild landet beim Schließen im Papierkorb, sofern es nicht mehr verlinkt ist. Nur lokale Bilder, keine `http(s)`-Links.
-- **Handschrift auf dem iPad:** Einstellung `mdLive.drawingDevice` auf `ipad` stellen (oder Command Palette → „Markdown Live: Draw on iPad: Show Address“, das stellt es gleich um). Die Adresse aus diesem Befehl in Safari auf dem iPad öffnen (wird in die Zwischenablage kopiert, per Universal Clipboard auf dem iPad einfügen) und am besten über „Teilen → Zum Home-Bildschirm“ ablegen. Die Seite wartet dann; `Alt+D` oder Doppelklick auf eine Zeichnung bzw. ein Bild am Mac öffnet die Zeichenfläche auf dem iPad, „Done“ fügt die Zeichnung in die Notiz ein. Am Mac zeigt eine Meldung, dass gezeichnet wird (dort auch „Cancel“). Mac und iPad müssen sich im Netzwerk erreichen können (gleiches WLAN, oder z. B. Tailscale). Nur der Pencil zeichnet, ein Finger verschiebt die Fläche, zwei Finger zoomen. Beim ersten Start fragt die macOS-Firewall evtl., ob VS Code eingehende Verbindungen annehmen darf → erlauben. Die Adresse enthält einen geheimen Schlüssel, der gleich bleibt (Port: `mdLive.ipadPort`, Standard 8765). Der Server läuft nur bei Bedarf: Er startet mit `Alt+D`/Doppelklick (oder „Show Address“) und stoppt 2 Minuten nach der letzten Zeichnung wieder, dann ist der Port zu. Die offene iPad-Seite verbindet sich von selbst neu, sobald er wieder läuft; ein Neuladen der Seite klappt nur, während er läuft.
-- **Handschrift über Sidecar:** Einstellung `mdLive.drawingDevice` auf `sidecar`. `Alt+D`/Doppelklick öffnet dieselbe Zeichenseite wie fürs iPad in einem eigenen Chrome-App-Fenster (eigenes Profil, ohne Leisten), direkt im Vollbild auf dem Sidecar-Bildschirm (erkannt am Namen mit „iPad“/„Sidecar“; ohne Chrome im Standardbrowser). Ist noch kein Sidecar verbunden, verbindet sich der Mac automatisch mit dem iPad aus der Einstellung `mdLive.sidecarIpad` (Name wie im Kontrollzentrum unter „Bildschirm“, z. B. `iPad von Michael`; leer = nie automatisch verbinden; über das private macOS-Framework SidecarCore, kann mit macOS-Updates kaputtgehen); klappt das nicht, öffnet sich die Seite normal am Mac. Solange das Fenster offen bleibt, erscheint jede weitere Zeichnung dort (es verbindet sich von selbst neu, erst nach ~5 s ohne Verbindung wird ein neues geöffnet). VS Code bleibt mit allen Tabs auf dem Mac-Bildschirm. Der Server lauscht dabei nur auf `127.0.0.1`, ist also von keinem anderen Gerät erreichbar – geeignet für fremde Netze wie eduroam.
-- **Zeichengerät umschalten:** in der Notiz über den Eintrag rechts in der Statusleiste (zeigt Mac/iPad/Sidecar) oder das Geräte-Symbol oben rechts im Tab („Choose Drawing Device“).
-- **Schriftgröße:** Symbol „Aa“ oben rechts im Tab bzw. Command Palette → „Markdown Live: Choose Font Size“ stellt die Schriftgröße nur für die geöffnete Notiz bzw. das geöffnete PDF ein (zieht beim Umbenennen in VS Code mit). „Default“ nimmt wieder den Standard aus der Einstellung `mdLive.fontSize`.
-- **Stichpunkte verschieben:** `Alt+↑` / `Alt+↓` verschiebt nur die Zeile des Stichpunkts unter dem Cursor (bzw. der markierten) um eine Zeile, mit gleicher Einrückung – wie Zeilen im Raw-Markdown oder in OneNote. Unterpunkte bleiben stehen und gehören danach zum Punkt, der über ihnen steht. Außerhalb von Listen werden ganze Absätze, Überschriften oder Bilder verschoben. Einrücken: `Tab` / `Shift+Tab` – ebenfalls nur die Zeile selbst, Unterpunkte behalten ihre Ebene.
-- **PDFs annotieren:** `.pdf`-Dateien öffnen sich mit Notizen am rechten Rand, die immer sichtbar sind (als Standard-Viewer: `"workbench.editorAssociations": { "*.pdf": "mdLive.pdf" }`). Text auswählen, dann `Alt+Q`/`W`/`E`/`R` markiert ihn rot/gelb/grün/blau wie im Live-Editor; mit `Alt+Shift+Q`/`W`/`E`/`R` (oder einem der Farbpunkte neben der Auswahl) kommt gleich eine Notiz dazu; `Alt+A` nimmt dafür eine zufällige eigene Farbe, damit sich Markierungen unterscheiden lassen. Eine Auswahl über eine bestehende Markierung ersetzt sie (z. B. um die Farbe zu ändern), ihre Notiz bleibt erhalten, die neben der Stelle steht. Klick auf eine Markierung öffnet ihre Notiz; bleibt eine Notiz leer, bleibt nur die Markierung (bei einer gerade erst mit Notiz erstellten Markierung verschwindet sie dann ganz). `Alt` gedrückt halten und ein Rechteck aufziehen: Notiz zu einem Bereich, ein Bild des Ausschnitts wird in der Notizdatei gespeichert (für Claude), aber in der Notiz nicht angezeigt; der Rahmen bekommt wie bei `Alt+A` eine zufällige Farbe. Jede Seite hat oben am Rand ein Textfeld für eine Notiz zur ganzen Seite. Notizen sind normales Markdown mit allem, was der Live-Editor kann (Bilder, Listen, Formeln, Handschrift mit `Alt+D`, auch am iPad). Notizen zu Markierungen stehen direkt auf der Folie, wenn nahe der Markierung genug freier Platz ist (ohne Text, Bilder oder andere Notizen zu verdecken), sonst am Rand. Nur am Rand zeigen sie oben den markierten Text. Neue Notizen schreibt man am Rand; erst wenn man sie verlässt, rücken sie auf die Folie, falls Platz ist. `Alt+P` in einer Notiz schiebt sie zum Bearbeiten an den Rand, danach wird wieder neu platziert. Liegen Notizen am Rand übereinander, rutschen sie nach unten; sind sie länger als die Seite, wächst der Abstand zur nächsten Seite. `×` löscht Notiz und Markierung; schneller geht es mit der Maus über einer Markierung und `Entf`/`Backspace`. `Cmd+Z` / `Cmd+Shift+Z` (außerhalb einer Notiz) macht Erstellen und Löschen von Markierungen rückgängig bzw. wiederholt es. In Notizen klappt `Alt+Y` Listenpunkte und Überschriften ein wie im Live-Editor. Zoomen mit `Ctrl`+Mausrad bzw. Pinch vergrößert Seiten und Notizen gemeinsam (die eingestellte Schriftgröße gilt für 100 %). Die Notizspalte reicht immer bis zum rechten Fensterrand. Gespeichert wird automatisch in `<datei>.pdf.md` neben dem PDF (Bilder in `<datei>.pdf.assets/`), das PDF selbst bleibt unverändert. Die Datei ist eine normale Notiz: `## Page 3` enthält die Seitennotiz, `### [markierter Text](#p3=…)` eine Markierung mit ihrer Notiz (die Zahlen sind die Position auf der Seite). Wird das PDF in VS Code umbenannt, ziehen die Notizen mit; wird es gelöscht, kommen Notizdatei und Bilder mit in den Papierkorb.
-- **Markierung an Claude:** Text markieren und `Alt+K` drücken (oder Funken-Symbol oben rechts). Die Datei wird kurz als Texteditor geöffnet, die passenden Zeilen markiert und als `@datei.md#Lx-y` an Claude Code übergeben.
-- **Vorlesungsenden und eigene Abschnitte:** In der Lücke unter einer Seite erscheint beim Darüberfahren ein `+` (oder über das Meilenstein-Symbol oben rechts nach der sichtbaren Seite). Es fragt nach Datum und/oder Titel: mit Datum (vorausgefüllt mit heute) ist es ein Vorlesungsende, als roter Strich unter der Folie; nur ein Titel startet einen eigenen Abschnitt (neutrale Linie). Klick auf die Linie bearbeitet sie, `×` löscht sie (rückgängig mit `Cmd+Z`). Das Meilenstein-Menü springt zu jeder Linie. Gespeichert werden sie als Liste `## Sections` am Anfang von `<datei>.pdf.md`. Im ✨-Menü erklärt „Explain the next lecture“ die Folien nach dem letzten Vorlesungsende bis zur nächsten Linie.
-- **Folien von Claude vorab erklären lassen:** Das ✨-Symbol oben rechts im PDF öffnet ein Menü: die nächsten 10 noch nicht erklärten Folien ab der sichtbaren Seite, einen Seitenbereich (`5-12, 20`), Folien zu einem Thema („alles zum Internet-Wurm“; Claude wählt die Seiten anhand ihres Texts aus) oder alle noch nicht erklärten. Claude Code (`claude`-CLI) läuft dann im Hintergrund (Fortschritt unten rechts, abbrechbar; das ✨ wird zum Ladekreis) und darf nur `<datei>.pdf.claude.md` schreiben; schon erklärte Folien werden übersprungen. Dasselbe geht in Claude Code mit `/explain-slides pfad/zur/datei.pdf` (Skill in `~/.claude/skills/explain-slides/`, wird auch vom ✨ benutzt). Jede Folie bekommt ihre Kernaussage und eine kurze Erklärung in Stichpunkten (auf Deutsch, unbekannte Begriffe als eigener Stichpunkt). Sie erscheint live als leicht getönter Kasten mit ✦-Symbol oben in der Seitennotiz: eingeklappt nur die Kernaussage, ein Klick (oder der Pfeil rechts) klappt die Stichpunkte auf. Der Text lässt sich markieren: `Alt+K` schickt die markierte Stelle (oder, mit dem Zeiger über dem Kasten, die ganze Erklärung) als Frage an Claude Code. Darunter schreibst du deine eigene Notiz. Aufgeklappt lässt sich die Erklärung auch direkt bearbeiten: Was du dort tippst, ist automatisch kursiv (Claude schreibt nie kursiv), so ist immer klar, was von dir ist; Claudes Text kannst du auch löschen. Markieren wie in Notizen mit `Alt+W`/`Alt+Q`/`Alt+E`/`Alt+R` (Cursor im Stichpunkt = ganzer Stichpunkt) oder einem Farbpunkt, `Alt+X` entfernt Markierungen jeder Farbe (auch in deinen eigenen Notizen); ein Doppelklick wählt einen ganzen Stichpunkt aus, die eingeklappte Kernaussage wird als Ganzes markiert. Alles landet in `<datei>.pdf.claude.md`. `×` verwirft eine Erklärung (rückgängig mit `Cmd+Z`). Die Glühbirne oben rechts klappt alle Erklärungen auf bzw. zu (volle Glühbirne = aufgeklappt); ganz ausblenden geht über die Einstellung `mdLive.pdfExplanations`. Deine eigene Notizdatei wird dabei nie angefasst.
-- **Fragen zum PDF an Claude:** Im PDF übergibt `Alt+K` die ausgewählte Textstelle, sonst die Notiz oder Markierung unter der Maus, sonst die gerade sichtbare Seite. In einer Notiz oder Erklärung geht es um den ausgewählten Text, sonst um den Stichpunkt am Cursor, sonst um die ganze Notiz bzw. Erklärung. Die Extension schreibt dazu `<datei>.pdf.assets/.claude.md` mit Seitenzahl, Zitat und allen Notizen zu dieser Seite und übergibt sie als `@`-Erwähnung; darin steht auch, dass Claude vom PDF nur diese Seite (bei Bedarf Nachbarseiten) lesen soll. Danach nur noch die Frage eintippen. Zu jeder Frage schlägt Claude nach der Antwort im Chat zusätzlich eine knappe Annotation vor (in `<datei>.pdf.assets/.proposals.md`). Sie erscheint gestrichelt in Violett mit ✦ unter der Notiz bzw. Erklärung (bei einer Textstelle auf der Folie ohne eigene Notiz in der Seitennotiz): „Add“ fügt sie als Unterpunkt unter dem gefragten Stichpunkt ein, bei einer ausgewählten Textstelle als neue Notiz auf dieser Stelle (zufällige Farbe wie bei `Alt+A`), bei einer Markierung in deren Notiz, sonst in der Seitennotiz (rückgängig mit `Cmd+Z`), „Dismiss“ verwirft sie. Bittest du Claude, einen Stichpunkt zu ändern (z. B. eine Annotation umzuformulieren), schlägt es stattdessen eine neue Fassung vor, die „Replace“ mit Unterpunkten ersetzt. Übernommene Annotationen in deinen Notizen beginnen mit `✦` und sind violett, so bleibt sichtbar, was von Claude stammt; in Claudes Erklärungen entfällt das `✦`. Damit Claude Code nicht jedes Mal nach der Schreiberlaubnis fragt, im Workspace der Vorlesungen in `.claude/settings.json` erlauben: `{ "permissions": { "allow": ["Edit(**/*.pdf.assets/.proposals.md)"] } }`.
+> **Status:** personal project, work in progress. Developed and tested on macOS only; the iPad/Sidecar features require a Mac. File formats may still change.
 
-## Tastenkürzel
+<!-- TODO: screenshots / GIFs (docs/images/) -->
 
-Gelten im Live-Editor und in den Notizen neben PDFs (dort nur in der Notiz, die den Fokus hat). `Alt` ist auf dem Mac die `Option`-Taste. Die Formatierungs-Kürzel schalten um: nochmal drücken entfernt die Formatierung wieder.
+## Features
 
-In Stichpunktlisten wirken alle Kürzel außer `Alt+M` auf den ganzen Stichpunkt, in dem der Cursor steht – auch ohne oder mit nur teilweiser Markierung. Ausnahme Hervorheben (`Alt+Q/W/E/R/H`): ohne Markierung der ganze Stichpunkt, mit Markierung nur der markierte Text. Außerhalb von Listen gilt nur der markierte Text.
+### Live Markdown editor
+- Edit `.md` files in their rendered form, in a single tab (built on [Milkdown Crepe](https://milkdown.dev)): headings, lists, tables, code blocks, math (KaTeX), task lists.
+- **Raw Markdown stays untouched:** only the blocks you actually change are reformatted; everything else keeps its original source, so diffs stay small.
+- Inline title like Obsidian: editing it renames the file.
+- Paste or drop images; they are saved in a per-note folder `note.assets/` and moved, copied and cleaned up together with the note.
+- Resize images by dragging their corners.
+- Colored highlights (`==text==`, compatible with Obsidian Highlightr), collapsible sections, moving list items with `Alt+↑/↓`, keyboard shortcuts for all formatting.
 
-| Shortcut | Funktion | Im Markdown |
-|---|---|---|
-| `Alt+B` | Fett | `**Text**` |
-| `Alt+I` | Kursiv | `*Text*` |
-| `Alt+S` | Durchgestrichen | `~~Text~~` |
-| `Alt+W` (oder `Alt+H`) | Hervorheben gelb | `==Text==` |
-| `Alt+Q` / `Alt+E` / `Alt+R` | Hervorheben rot / grün / blau (nochmal gleiche Farbe = entfernen, andere Farbe = umfärben) | `<mark style="background: #FF5582A6;">Text</mark>` |
-| `Alt+C` | Code (ersetzt andere Formatierungen) | `` `Text` `` |
-| `Alt+M` | Formel (auch: Formel anklicken → zurück zu Text) | `$Text$` |
-| `Alt+1` … `Alt+6` | Überschrift Ebene 1–6 (gleiche Ebene nochmal = normaler Text) | `# Text` … `###### Text` |
-| `Alt+^` | Überschrift aufheben (normaler Text) | – |
-| `Alt+Y` | Abschnitt der Überschrift ein-/ausklappen, in der der Cursor steht; in einem Unterstichpunkt nur diesen Stichpunkt (bzw. den übergeordneten, wenn er keine Unterpunkte hat). Eingeklapptes zeigt eine Pille mit der Anzahl ausgeblendeter Blöcke/Unterpunkte (Klick klappt auf), eingeklappte Stichpunkte zusätzlich einen Ring um den Punkt. Wird pro Notiz gemerkt | – (nur Ansicht) |
-| `Alt+K` | Markierung an Claude Code übergeben | – |
-| `Alt+D` | Handschrift/Zeichnung einfügen | Bildlink auf `notiz.assets/….drawing.svg` |
-| `Alt+↑` / `Alt+↓` | Stichpunkt bzw. Absatz nach oben/unten verschieben | – |
-| `Tab` / `Shift+Tab` | Stichpunkt ein-/ausrücken | – |
-| `Tab` / `Shift+Tab` in Überschrift | Überschrift eine Ebene tiefer/höher (H2 → H3 / H3 → H2) | – |
+### PDF margin notes
+- PDFs open with a notes column next to every page. Each page has its own note, and text or areas you highlight get their own notes.
+- Notes are full Markdown editors (images, math, lists, handwriting) and are placed **directly on the slide** when there is free space next to the highlight, otherwise in the margin, connected by a line.
+- Highlights in four colors or random custom colors; area snapshots; undo/redo; lecture-end markers between pages.
+- Stored in `paper.pdf.md` next to the PDF; the PDF itself is never modified.
 
-### Im PDF
+### Handwriting
+- An infinite, OneNote-like canvas for handwritten notes and sketches (pen, highlighter, eraser, lasso, shapes, insert space), saved as SVG with the stroke data embedded, so drawings stay editable.
+- Draw on top of images in a note.
+- **Draw on an iPad with Apple Pencil:** either in Safari on the iPad (local server, Wi-Fi or USB) or full screen on a Sidecar display.
 
-Gelten für Text, der im PDF ausgewählt ist (nicht in einer Notiz).
+### Claude Code integration (optional)
+- `Alt+K` sends the selected passage, highlight or page, together with your notes on it, to [Claude Code](https://claude.com/claude-code) as context for a question.
+- Claude can explain slides in advance: every slide gets its key message and a short explanation, shown in the page's note card. Your own additions are kept apart (italics).
+- After answering, Claude proposes a short annotation that you can accept into your notes with one click.
 
-| Shortcut | Funktion | In `<datei>.pdf.md` |
-|---|---|---|
-| `Alt+Q` / `Alt+W` / `Alt+E` / `Alt+R` (`Alt+H` = gelb) | Text rot / gelb / grün / blau markieren | `### [Text](#p3=…&c=red)` (gelb ohne `&c=`) |
-| `Alt+Shift+Q` / `W` / `E` / `R`, `Alt+A` (zufällige Farbe) oder Farbpunkt neben der Auswahl | Markieren und gleich eine Notiz dazu schreiben | Überschrift wie oben, darunter die Notiz |
-| `Alt` + Rechteck ziehen | Bereich markieren, Bild des Ausschnitts kommt in die Notiz | `### [Area](#p3=…&area)` |
-| `Alt+K` | Auswahl, Markierung unter der Maus oder sichtbare Seite mit den Notizen dazu an Claude Code übergeben | – (`<datei>.pdf.assets/.claude.md`) |
-| `Ctrl`+Mausrad / Pinch | Seiten und Notizen zoomen | – |
-| `Shift+⌫` / `Shift+Entf` (in einer Notiz) | Ganze Notiz samt Markierung löschen (Seitennotiz: leeren); `Cmd+Z` außerhalb der Notizen holt sie zurück | Abschnitt entfällt |
-| `Alt+P` (in einer Notiz) | Notiz zum Bearbeiten an den Rand neben die Folie schieben; beim Verlassen wird neu platziert | – |
+## Installation
 
-## Bekannte Einschränkungen
+Markside is not on the VS Code Marketplace yet. Install it from a release:
 
-- **Kopieren zwischen verschiedenen Workspaces/VS-Code-Fenstern:** Beim Kopieren einer Notiz sucht die Extension die verlinkten Bilder nur im aktuell geöffneten Workspace und kopiert sie in den `.assets`-Ordner der Kopie. Liegt das Original in einem anderen Workspace (z. B. Kopieren aus einem anderen Repo bzw. VS-Code-Fenster), werden die Bilder nicht gefunden und die Links in der Kopie sind kaputt. Abhilfe: den `.assets`-Ordner im Finder mitkopieren, oder beide Ordner in einem Multi-Root-Workspace öffnen (dann werden alle Ordner durchsucht).
-- **PDF löschen:** Die Notizen eines PDFs (`<datei>.pdf.md` und `<datei>.pdf.assets/`) bleiben beim Löschen des PDFs liegen und müssen von Hand gelöscht werden; nur Umbenennen/Verschieben in VS Code zieht sie mit.
-- **Dateioperationen außerhalb von VS Code** (Finder, Terminal, git) bekommt die Extension nicht mit: Notiz und `<notiz>.assets/` müssen dort zusammen verschoben bzw. kopiert werden.
+1. Download `markside-<version>.vsix` from the [Releases](../../releases) page.
+2. Run `code --install-extension markside-<version>.vsix` (or in VS Code: *Extensions* → `…` → *Install from VSIX…*).
 
-## Entwicklung
+Or build it yourself:
 
 ```bash
 npm install
-npm run build      # oder: npm run watch
+npm run package
+code --install-extension markside-0.1.0.vsix
 ```
 
-`F5` startet eine Extension-Development-Instanz mit dem Ordner `notes/`.
+### Requirements
+- VS Code 1.95 or newer.
+- Optional, for the Claude features: the [Claude Code](https://marketplace.visualstudio.com/items?itemName=anthropic.claude-code) extension and the `claude` CLI. To let Claude explain slides, copy [`skills/explain-slides`](skills/explain-slides/SKILL.md) to `~/.claude/skills/`. Claude writes explanations and annotations in English; set `mdLive.claudeLanguage` (e.g. `German`) for another language.
+- Optional, for drawing on the Sidecar display: Google Chrome.
+
+### Recommended settings
+
+Hide the helper files Markside creates next to your notes and PDFs:
+
+```json
+"files.exclude": {
+  "**/*.assets": { "when": "$(basename).md" },
+  "**/*.pdf.md": { "when": "$(basename)" },
+  "**/*.pdf.claude.md": true
+}
+```
+
+## Usage
+
+- Open a `.md` file and click the pencil icon in the editor title (or *Markside: Open in Live Editor*). The `</>` icon switches back to the raw Markdown.
+- PDFs open in Markside by default. Select text and press `Alt+W` to highlight it, `Alt+Shift+W` to highlight it and write a note.
+- `Alt+D` opens the handwriting canvas.
+
+The full manual with all features and settings is in [docs/usage.md](docs/usage.md).
+
+### Keyboard shortcuts
+
+`Alt` is the `Option` key on a Mac. Formatting shortcuts toggle; in lists they apply to the whole item under the cursor.
+
+| Shortcut | Action |
+|---|---|
+| `Alt+B` / `Alt+I` / `Alt+S` | Bold / italic / strikethrough |
+| `Alt+W` (or `Alt+H`) | Yellow highlight |
+| `Alt+Q` / `Alt+E` / `Alt+R` | Red / green / blue highlight |
+| `Alt+X` | Remove highlights |
+| `Alt+C` / `Alt+M` | Inline code / inline math |
+| `Alt+1` … `Alt+6`, `Alt+^` | Heading level 1–6, back to paragraph |
+| `Alt+Y` | Collapse/expand the section or list item at the cursor |
+| `Alt+↑` / `Alt+↓` | Move list item or block up/down |
+| `Tab` / `Shift+Tab` | Indent/outdent list item; in a heading, change its level |
+| `Alt+D` | Insert handwriting |
+| `Alt+K` | Ask Claude Code about the selection |
+
+In the PDF view (text selected in the PDF):
+
+| Shortcut | Action |
+|---|---|
+| `Alt+Q` / `W` / `E` / `R` | Highlight red / yellow / green / blue |
+| `Alt+Shift+Q` / `W` / `E` / `R`, `Alt+A` | Highlight and open a note (`Alt+A`: random color) |
+| `Alt` + drag | Note on an area of the page (with snapshot) |
+| `Alt+K` | Ask Claude about the selection, the highlight under the pointer or the page |
+| `Delete` (pointer over a highlight), `Shift+Delete` (in a note) | Delete highlight and note |
+| `Cmd+Z` / `Cmd+Shift+Z` (outside notes) | Undo/redo creating and deleting notes |
+| `Ctrl`+wheel / pinch | Zoom pages and notes together |
+
+## Files on disk
+
+| File | Content |
+|---|---|
+| `note.md` | The note itself (standard Markdown; resized images as `<img width>`, colored highlights as `<mark>`) |
+| `note.assets/` | Images and drawings of the note (`*.drawing.svg`, strokes embedded in `<metadata>`), collapsed sections (`.folds.json`) |
+| `paper.pdf.md` | Notes of a PDF: `## Page N` = page note, `### [quote](#p3=x,y,w,h)` = note on a highlight |
+| `paper.pdf.assets/` | Images and area snapshots of the PDF notes, context files for Claude |
+| `paper.pdf.claude.md` | Claude's explanations of the slides |
+
+## How it works
+
+Markside consists of two custom editors (Markdown and PDF) whose webviews talk to the extension host over `postMessage`, plus a separate drawing page for the iPad. A few parts that were more interesting to build:
+
+- **The `TextDocument` is the single source of truth.** The webview is only a view; every change is sent as full Markdown and applied as a minimal edit (only the changed middle part), so VS Code's undo, dirty state and Git diffs behave like in a normal text editor. Echo prevention on both sides keeps changes from bouncing back.
+- **Source preservation** ([`preserve.ts`](src/preserve.ts)): the Markdown serializer normalizes the whole document on every keystroke. To avoid that, the extension splits old and new text into top-level blocks with remark, matches them by their normalized form (LCS), and keeps the original source of every unchanged block.
+- **Placing notes on the slide** ([`pdf/main.ts`](src/webview/pdf/main.ts)): free space on a rendered page is detected from the canvas pixels, and a summed-area table over a grid finds the closest free spot for each note whose connector line crosses no content and no other note.
+- **Drawings as editable SVGs** ([`drawing.ts`](src/webview/drawing.ts)): strokes are stored as pressure-dependent polylines inside the SVG's metadata, so a drawing displays everywhere as a normal image and reopens with all strokes.
+- **iPad drawing** ([`drawingServer.ts`](src/drawingServer.ts)): an on-demand local HTTP server with a secret token pushes drawing requests to the iPad via server-sent events. Drafts and finished drawings are kept in the iPad's local storage and resent until the Mac confirms them, so nothing gets lost when VS Code reloads or the connection drops.
+
+[CLAUDE.md](CLAUDE.md) describes the architecture and message protocol in full detail.
+
+## Security notes
+
+- The iPad drawing server only runs when the drawing device is set to `ipad`, `ipadUsb` or `sidecar`, and stops two minutes after the last drawing. All routes require a secret token in the URL; the connection is plain HTTP. In public networks, use `ipadUsb` (USB cable only) or `sidecar` (localhost only).
+- Explaining slides runs `claude -p` in the PDF's folder with read access and write access to the explanations file only.
+
+## Known limitations
+
+- Developed on macOS only; Windows and Linux are untested.
+- `Alt` shortcuts block some characters typed with `Option` on a Mac (e.g. `[`, `]` and `€` on German keyboards, accent dead keys on US keyboards).
+- File operations outside VS Code (Finder, terminal, Git) are not tracked: move or copy a note together with its `.assets` folder.
+- When a note is copied from another workspace, its images are not found and the links in the copy break.
+- Sidecar auto-connect uses a private macOS framework and may break with macOS updates.
+
+## Development
+
+```bash
+npm install
+npm run build        # or: npm run watch
+npx tsc --noEmit     # typecheck
+npm run package      # build the .vsix
+```
+
+`F5` launches an Extension Development Host with the `notes/` folder as test workspace.
+
+## License
+
+[MIT](LICENSE)

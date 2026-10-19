@@ -145,7 +145,7 @@ async function chooseTheme(): Promise<void> {
     { label: 'Light', description: 'Always light', value: 'light' },
     { label: 'Dark', description: 'Always dark', value: 'dark' },
   ];
-  const picked = await vscode.window.showQuickPick(items, { placeHolder: 'Color mode of the Markdown Live Editor' });
+  const picked = await vscode.window.showQuickPick(items, { placeHolder: 'Color mode of Markside' });
   if (picked) {
     await vscode.workspace.getConfiguration('mdLive').update('theme', picked.value, vscode.ConfigurationTarget.Global);
   }
@@ -155,7 +155,7 @@ async function chooseTheme(): Promise<void> {
 async function chooseFontSize(fontSizes: FontSizes): Promise<void> {
   const input = vscode.window.tabGroups.activeTabGroup.activeTab?.input;
   if (!(input instanceof vscode.TabInputCustom && [LiveEditorProvider.viewType, PdfEditorProvider.viewType].includes(input.viewType))) {
-    vscode.window.showWarningMessage('No Markdown Live Editor or PDF is active.');
+    vscode.window.showWarningMessage('No Markside note or PDF is active.');
     return;
   }
   const own = fontSizes.own(input.uri);

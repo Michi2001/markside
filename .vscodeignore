@@ -5,3 +5,7 @@ notes/**
 esbuild.mjs
 tsconfig.json
 **/*.map
+skills/**
+docs/**
+CLAUDE.md
+markside_demo/

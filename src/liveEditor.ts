@@ -46,7 +46,7 @@ export class LiveEditorProvider implements vscode.CustomTextEditorProvider {
 
   postToActivePanel(type: 'requestSelection' | 'insertDrawing'): void {
     if (!this.activePanel) {
-      vscode.window.showWarningMessage('No Markdown Live Editor is active.');
+      vscode.window.showWarningMessage('No Markside note is active.');
       return;
     }
     this.activePanel.webview.postMessage({ type });

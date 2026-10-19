@@ -92,7 +92,7 @@ export async function explainSlides(view: PdfView, onRunningChange: () => void):
   // The start of every page's text tells Claude what later slides cover, so it doesn't explain it early.
   const pagesPrompt = async (pages: number[]) =>
     `Use the explain-slides skill: explain pages ${pages.join(', ')} of "${pdfName}" and add them to "${fileName}" ` +
-    'in ascending page order; keep everything already in that file unchanged.\n\n' +
+    `in ascending page order; keep everything already in that file unchanged. Write the explanations in ${getClaudeLanguage()}.\n\n` +
     'Outline of the whole lecture (start of every page\'s text), to see what later slides cover:\n\n' +
     (await view.pageTexts()).map((t, i) => `--- Page ${i + 1} ---\n${t.slice(0, OUTLINE_LENGTH)}`).join('\n\n');
 
@@ -142,7 +142,7 @@ export async function explainSlides(view: PdfView, onRunningChange: () => void):
         `Use the explain-slides skill for "${pdfName}", but only for the slides about: ${topic.trim()}\n` +
         `Choose those slides from the page texts below (physical page numbers) and read only them. ` +
         `Skip pages already in "${fileName}"${explained.size > 0 ? ` (${formatPages([...explained].sort((a, b) => a - b))})` : ''}; ` +
-        'add the new pages in ascending page order and keep everything already in that file unchanged.\n\n' +
+        `add the new pages in ascending page order and keep everything already in that file unchanged. Write the explanations in ${getClaudeLanguage()}.\n\n` +
         texts.join('\n\n')
       );
     },
@@ -194,4 +194,9 @@ async function run(pdf: vscode.Uri, file: vscode.Uri, prompt: string, onRunningC
   );
   running.delete(key);
   onRunningChange();
+}
+
+// Language of Claude's explanations and annotations (setting mdLive.claudeLanguage).
+export function getClaudeLanguage(): string {
+  return vscode.workspace.getConfiguration('mdLive').get<string>('claudeLanguage', 'English').trim() || 'English';
 }

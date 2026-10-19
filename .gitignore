@@ -2,3 +2,4 @@ node_modules
 dist
 *.vsix
 notes/
+markside_demo
