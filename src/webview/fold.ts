@@ -167,7 +167,7 @@ export const foldPlugin = (onChange: (folds: Fold[]) => void) =>
                   hide(p, state.doc.nodeAt(p)!);
                   count++;
                 }
-                decorations.push(badge(pos, pos + node.nodeSize - 1, count === 1 ? '1 Block' : `${count} Blöcke`));
+                decorations.push(badge(pos, pos + node.nodeSize - 1, count === 1 ? '1 block' : `${count} blocks`));
                 continue;
               }
               // List item: ring around its bullet, badge after its first paragraph, sublists hidden.
@@ -182,7 +182,7 @@ export const foldPlugin = (onChange: (folds: Fold[]) => void) =>
                 }
               });
               const end = pos + node.firstChild!.nodeSize;
-              decorations.push(badge(pos, end, count === 1 ? '1 Unterpunkt' : `${count} Unterpunkte`));
+              decorations.push(badge(pos, end, count === 1 ? '1 sub-item' : `${count} sub-items`));
             }
             return DecorationSet.create(state.doc, decorations);
           },

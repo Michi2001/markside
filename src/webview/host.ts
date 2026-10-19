@@ -58,6 +58,8 @@ export function drawRemotely(drawing: Drawing, src?: string): Promise<string | n
 
 function setFontSize(size: number): void {
   document.body.style.setProperty('--mdlive-font-size', `${size}px`);
+  // Unitless, for sizes calc() can't derive from a length (Crepe's toolbar).
+  document.body.style.setProperty('--mdlive-font-scale', `${size / 16}`);
 }
 
 export function applyInit(msg: { baseUri: string; theme: string; fontSize: number; drawingDevice: string }): void {

@@ -59,6 +59,8 @@ const RIGHT_WEIGHT = 0.6;
 // A card goes onto the page only within this distance of its mark (fraction of the page's longer
 // side); farther away, the margin is easier to follow.
 const MAX_PAGE_DISTANCE = 0.12;
+// A card on the page may stick out past its right edge by this share of its width (into the margin).
+const MAX_OVERHANG = 0.5;
 // Hues of red and green; random colors (Alt+A, stored as `h<hue>`) keep away from them.
 const AVOID_HUES = [345, 135];
 
@@ -1083,6 +1085,13 @@ function layoutRow(pv: PageView): void {
   rowCards.forEach((card) => card.place && (card.el.style.width = `${card.place.w}px`));
   margin.forEach((card) => heights.set(card, card.el.offsetHeight));
 
+  // Cards sticking out of the page into the column: margin cards go above or below them.
+  const overhangs = rowCards
+    .filter((card) => card.place && card.place.x * scale + card.place.w * z > pv.width * scale + GAP)
+    .map((card) => {
+      const t = (card.place!.y * scale) / z;
+      return { top: t - CARD_GAP, bottom: t + heights.get(card)! + CARD_GAP };
+    });
   let y = 0;
   const placed: { card: Card; top: number }[] = [];
   for (const card of rowCards) {
@@ -1091,7 +1100,11 @@ function layoutRow(pv: PageView): void {
       card.el.style.top = `${(card.place.y * scale) / z}px`;
     } else {
       const desired = card.section.anchor ? top(card.section.anchor) * pageHeight - 10 : 0;
-      const cardTop = Math.max(desired, y);
+      let cardTop = Math.max(desired, y);
+      let blocking;
+      while ((blocking = overhangs.find((o) => o.top < cardTop + heights.get(card)! && cardTop < o.bottom))) {
+        cardTop = blocking.bottom;
+      }
       card.el.style.left = '';
       card.el.style.top = `${cardTop}px`;
       y = cardTop + heights.get(card)! + CARD_GAP;
@@ -1177,8 +1190,11 @@ function placeOnPage(
   const own = { x0: mark.x0 - CELL, y0: mark.y0 - CELL, x1: mark.x1 + CELL, y1: mark.y1 + CELL };
   const clearLine = (card: Box) =>
     alongLine(connector(mark, card), (c, r, x, y) =>
-      inside(own, x, y) || inside(card, x, y) || (!raw[r * cols + c] && !boxes.some((b) => inside(b, x, y))),
+      inside(own, x, y) || inside(card, x, y) || ((c >= cols || !raw[r * cols + c]) && !boxes.some((b) => inside(b, x, y))),
     );
+  // Past the page's right edge there are no cells, only other cards.
+  const clearOutside = (card: Box) =>
+    card.x1 <= pv.width || !boxes.some((b) => b.x1 > pv.width && b.x0 < card.x1 && card.x0 < b.x1 && b.y0 < card.y1 && card.y0 < b.y1);
   // The margin starts at the page's right edge; a spot farther away than that is no gain.
   let best = Math.min(pv.width - mark.x1 + GAP / scale, MAX_PAGE_DISTANCE * Math.max(pv.width, pv.height));
   let place: { x: number; y: number; w: number } | null = null;
@@ -1192,13 +1208,15 @@ function placeOnPage(
       if (dy + cost >= best) {
         continue;
       }
-      for (let c = 0; c + cw <= cols; c++) {
+      for (let c = 0; c + cw <= cols + Math.floor(cw * MAX_OVERHANG); c++) {
         const x = c * CELL;
         const dx = x >= mark.x1 ? (x - mark.x1) * RIGHT_WEIGHT : Math.max(0, mark.x0 - (x + wPt));
         const d = Math.hypot(dx, dy) + cost;
+        const c1 = Math.min(c + cw, cols);
         const used = () =>
-          sum[(r + ch) * (cols + 1) + c + cw] - sum[r * (cols + 1) + c + cw] - sum[(r + ch) * (cols + 1) + c] + sum[r * (cols + 1) + c];
-        if (d < best && used() === 0 && clearLine({ x0: x, y0: y, x1: x + wPt, y1: y + hPt })) {
+          sum[(r + ch) * (cols + 1) + c1] - sum[r * (cols + 1) + c1] - sum[(r + ch) * (cols + 1) + c] + sum[r * (cols + 1) + c];
+        const box = { x0: x, y0: y, x1: x + wPt, y1: y + hPt };
+        if (d < best && used() === 0 && clearOutside(box) && clearLine(box)) {
           best = d;
           place = { x, y, w };
         }
@@ -1320,9 +1338,35 @@ function pdfSelection(): { range: Range; pv: PageView } | undefined {
   if (!selection || selection.isCollapsed || selection.rangeCount === 0) {
     return undefined;
   }
-  const range = selection.getRangeAt(0);
+  const range = snapToWords(selection.getRangeAt(0));
   const pv = pageOf(range.startContainer);
   return pv && pv.pageEl.contains(range.startContainer) ? { range, pv } : undefined;
+}
+
+// Completes words cut at the selection's ends: the text layer's glyphs don't match the PDF's exactly
+// (e.g. a "• " in front of a bullet's text), so a drag starting on the first letter often begins after it.
+function snapToWords(selected: Range): Range {
+  const range = selected.cloneRange();
+  const word = /[\p{L}\p{N}]/u;
+  const start = range.startContainer;
+  if (start.nodeType === Node.TEXT_NODE) {
+    const text = start.textContent!;
+    let i = range.startOffset;
+    while (i > 0 && i < text.length && word.test(text[i]) && word.test(text[i - 1])) {
+      i--;
+    }
+    range.setStart(start, i);
+  }
+  const end = range.endContainer;
+  if (end.nodeType === Node.TEXT_NODE) {
+    const text = end.textContent!;
+    let i = range.endOffset;
+    while (i > 0 && i < text.length && word.test(text[i - 1]) && word.test(text[i])) {
+      i++;
+    }
+    range.setEnd(end, i);
+  }
+  return range;
 }
 
 function markSelection(color: string, edit: boolean): void {

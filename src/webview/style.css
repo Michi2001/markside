@@ -132,6 +132,11 @@ body[data-theme='dark'] {
 
 /* Crepe only hides its selection toolbar on the next selection change, so it would stay open after
    clicking somewhere outside the editor. */
+/* Crepe sizes its toolbar in px; scale the items (not the toolbar, whose left/top would scale too). */
+.milkdown .milkdown-toolbar > * {
+  zoom: var(--mdlive-font-scale, 1);
+}
+
 .milkdown:not(:focus-within) .milkdown-toolbar {
   display: none !important;
 }
@@ -283,7 +288,7 @@ body[data-theme='dark'] {
   border-radius: 999px;
   background: var(--vscode-badge-background);
   color: var(--vscode-badge-foreground);
-  font-size: 0.75rem;
+  font-size: calc(var(--crepe-base-font-size, 16px) * 0.75);
   font-weight: 500;
   line-height: 1.6;
   vertical-align: middle;
