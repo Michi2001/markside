@@ -278,7 +278,7 @@ body.alt .page .textLayer span {
   gap: 6px;
   padding: 6px 6px 0 12px;
   font-family: var(--vscode-font-family);
-  font-size: 12px;
+  font-size: calc(var(--mdlive-font-size, 16px) * 0.75);
   color: var(--vscode-descriptionForeground);
   cursor: pointer;
 }
@@ -319,12 +319,12 @@ body.alt .page .textLayer span {
 /* Text notes: the quote as one small line. */
 .card:not(.page-note):not(.area) .card-head {
   padding-top: 3px;
-  font-size: 11px;
+  font-size: calc(var(--mdlive-font-size, 16px) * 0.6875);
 }
 
 .card:not(.page-note):not(.area) .card-label {
   -webkit-line-clamp: 1;
-  line-height: 18px;
+  line-height: 1.6;
 }
 
 /* On the page, right next to its mark, a text note needs no quote either: like area notes, only ×
@@ -354,7 +354,7 @@ body.alt .page .textLayer span {
   font-weight: 600;
   text-transform: uppercase;
   letter-spacing: 0.04em;
-  font-size: 11px;
+  font-size: calc(var(--mdlive-font-size, 16px) * 0.6875);
 }
 
 .card-delete {
