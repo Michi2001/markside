@@ -4,7 +4,7 @@
 
 Live Markdown editing and PDF margin notes, with handwriting and Claude Code integration. Markdown notes are edited in their rendered form (like Obsidian or Typora), and lecture slides open as PDFs with always-visible notes next to every page. Everything is stored as plain Markdown next to your files, so notes stay readable on GitHub, in Obsidian or in any text editor.
 
-<!-- Demo video: in GitHub's web editor, drag markside_demo.mp4 onto this line; GitHub uploads it and inserts its github.com/user-attachments/... link, which renders as a player. -->
+https://github.com/user-attachments/assets/1b1b6b3e-4b06-4faf-919f-758eef49fd7b
 
 > **Status:** personal project, work in progress. Developed and tested on macOS only; the iPad/Sidecar features require a Mac. File formats may still change.
 
