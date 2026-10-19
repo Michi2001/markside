@@ -5,6 +5,14 @@
   "version": "0.1.0",
   "publisher": "michael",
   "license": "MIT",
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/Michi2001/markside.git"
+  },
+  "homepage": "https://github.com/Michi2001/markside#readme",
+  "bugs": {
+    "url": "https://github.com/Michi2001/markside/issues"
+  },
   "keywords": [
     "markdown",
     "wysiwyg",
@@ -369,7 +377,7 @@
         "mdLive.sidecarIpad": {
           "type": "string",
           "default": "",
-          "description": "Name of the iPad that Sidecar mode connects to automatically when no Sidecar display is present (as listed under Displays in Control Center, e.g. 'iPad von Michael'; a trailing number like ' (6)' is optional). Empty: never connect automatically."
+          "description": "Name of the iPad that Sidecar mode connects to automatically when no Sidecar display is present (as listed under Displays in Control Center, e.g. 'My iPad'; a trailing number like ' (6)' is optional). Empty: never connect automatically."
         },
         "mdLive.ipadPort": {
           "type": "number",
@@ -383,7 +391,7 @@
     "build": "node esbuild.mjs",
     "vscode:prepublish": "npm run build",
     "watch": "node esbuild.mjs --watch",
-    "package": "npx @vscode/vsce package --no-dependencies --no-rewrite-relative-links"
+    "package": "npx @vscode/vsce package --no-dependencies"
   },
   "devDependencies": {
     "@types/mdast": "^4.0.4",

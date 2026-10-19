@@ -4,9 +4,9 @@
 
 Live Markdown editing and PDF margin notes, with handwriting and Claude Code integration. Markdown notes are edited in their rendered form (like Obsidian or Typora), and lecture slides open as PDFs with always-visible notes next to every page. Everything is stored as plain Markdown next to your files, so notes stay readable on GitHub, in Obsidian or in any text editor.
 
-> **Status:** personal project, work in progress. Developed and tested on macOS only; the iPad/Sidecar features require a Mac. File formats may still change.
+<!-- Demo video: in GitHub's web editor, drag markside_demo.mp4 onto this line; GitHub uploads it and inserts its github.com/user-attachments/... link, which renders as a player. -->
 
-<!-- TODO: screenshots / GIFs (docs/images/) -->
+> **Status:** personal project, work in progress. Developed and tested on macOS only; the iPad/Sidecar features require a Mac. File formats may still change.
 
 ## Features
 
@@ -128,7 +128,7 @@ Markside consists of two custom editors (Markdown and PDF) whose webviews talk t
 
 ## Security notes
 
-- The iPad drawing server only runs when the drawing device is set to `ipad`, `ipadUsb` or `sidecar`, and stops two minutes after the last drawing. All routes require a secret token in the URL; the connection is plain HTTP. In public networks, use `ipadUsb` (USB cable only) or `sidecar` (localhost only).
+- **iPad drawing server: recommended for private, trusted networks only.** The connection is plain HTTP, protected only by a secret token in the URL. The server only runs when the drawing device is set to `ipad`, `ipadUsb` or `sidecar`, and stops two minutes after the last drawing. In public networks, use `ipadUsb` (USB cable only) or `sidecar` (localhost only).
 - Explaining slides runs `claude -p` in the PDF's folder with read access and write access to the explanations file only.
 
 ## Known limitations
