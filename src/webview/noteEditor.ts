@@ -257,15 +257,24 @@ export function selectedDrawings(state: EditorState): Promise<ClaudeDrawing[]> {
   return Promise.all(srcs.map(async (src) => ({ src, png: await drawingPng(resolveUrl(src)) })));
 }
 
-// Sends the selected plain text of the active editor (and the drawings in it) to the extension (Alt+K → Claude).
-export async function sendSelection(): Promise<void> {
+// Sends the selected plain text of the active editor (and the drawings in it) to the extension (Alt+K → Claude);
+// `propose` (Alt+Shift+K) lets Claude suggest changes. A selection in a suggestion card, or the card
+// under the pointer, asks about that suggestion.
+export async function sendSelection(propose = false): Promise<void> {
+  const selection = window.getSelection();
+  const selected = selection && !selection.isCollapsed ? selection.anchorNode?.parentElement?.closest<HTMLElement>('.mdlive-suggestion') : null;
+  const suggestion = selected ?? document.querySelector<HTMLElement>('.mdlive-suggestion:hover');
+  if (suggestion) {
+    post({ type: 'selection', text: selected ? selection!.toString() : '', propose, suggestion: suggestion.dataset.id });
+    return;
+  }
   if (!active) {
     post({ type: 'selection', text: '' });
     return;
   }
   const { state } = active.view();
   const { from, to } = listItemRange(state) ?? state.selection;
-  post({ type: 'selection', text: state.doc.textBetween(from, to, '\n', ' '), drawings: await selectedDrawings(state) });
+  post({ type: 'selection', text: state.doc.textBetween(from, to, '\n', ' '), drawings: await selectedDrawings(state), propose });
 }
 
 // Alt+<key> formatting commands (Crepe/Milkdown command names).
@@ -343,7 +352,7 @@ function clearFormatting(view: EditorView): void {
 
 // Handled on the window (not as a ProseMirror keymap) so Alt+M also works while the formula tooltip
 // has focus. `ignore` skips keys meant for other parts of the page.
-// Alt+K mirrors the Claude Code shortcut for "Insert @-Mention Reference".
+// Alt+K mirrors the Claude Code shortcut for "Insert @-Mention Reference"; with Shift Claude may suggest changes.
 export function installShortcuts(ignore: (e: KeyboardEvent) => boolean): void {
   window.addEventListener(
     'keydown',
@@ -368,7 +377,7 @@ export function installShortcuts(ignore: (e: KeyboardEvent) => boolean): void {
       if (e.code === 'KeyK') {
         e.preventDefault();
         e.stopPropagation();
-        sendSelection();
+        sendSelection(e.shiftKey);
       } else if (e.code === 'KeyD') {
         e.preventDefault();
         e.stopPropagation();

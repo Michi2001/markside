@@ -1549,31 +1549,31 @@ function explanationSelection(): { page: number; quote: string } | undefined {
   return card && { page: card.section.page, quote: selection.toString().replace(/\s+/g, ' ').trim() };
 }
 
-function askClaude(): void {
+function askClaude(propose: boolean): void {
   const explained = explanationSelection();
   if (explained) {
-    post({ type: 'askClaude', page: explained.page, quote: explained.quote, explanation: true });
+    post({ type: 'askClaude', page: explained.page, quote: explained.quote, explanation: true, propose });
     return;
   }
   if (hoveredClaude) {
-    post({ type: 'askClaude', page: hoveredClaude, explanation: true });
+    post({ type: 'askClaude', page: hoveredClaude, explanation: true, propose });
     return;
   }
   const current = pdfSelection();
   if (current) {
     const quote = current.range.toString().replace(/\s+/g, ' ').trim();
     // Color of the note it may get from Claude's proposal (random, like Alt+A).
-    post({ type: 'askClaude', page: current.pv.num, quote, rects: selectionRects(current.range, current.pv), color: randomColor(current.pv.num) });
+    post({ type: 'askClaude', page: current.pv.num, quote, rects: selectionRects(current.range, current.pv), color: randomColor(current.pv.num), propose });
     return;
   }
   if (hoveredCard) {
-    post({ type: 'askClaude', page: hoveredCard.section.page, key: hoveredCard.key, note: true });
+    post({ type: 'askClaude', page: hoveredCard.section.page, key: hoveredCard.key, note: true, propose });
     return;
   }
   const mark = latestSections.find((s) => s.key === hoveredMark);
   const page = mark?.page ?? pageInView()?.num;
   if (page) {
-    post({ type: 'askClaude', page, key: mark?.key });
+    post({ type: 'askClaude', page, key: mark?.key, propose });
   }
 }
 
@@ -1908,7 +1908,7 @@ window.addEventListener(
       }
       return;
     }
-    // Alt+K in a card asks Claude about it; Claude then proposes an annotation (`applyProposals`).
+    // Alt+K in a card asks Claude about it; with Shift Claude also proposes an annotation (`applyProposals`).
     const focusedCard = [...cards.values()].find((c) => c.el === focused);
     // Alt+K in Claude's explanation asks about the selected passage or the bullet at the cursor, else
     // the whole explanation.
@@ -1917,7 +1917,7 @@ window.addEventListener(
       e.stopImmediatePropagation();
       const state = focusedCard.claude?.editor?.view().state;
       const quote = state ? questionText(state) : window.getSelection()?.toString().replace(/\s+/g, ' ').trim() || undefined;
-      post({ type: 'askClaude', page: focusedCard.section.page, quote, explanation: true });
+      post({ type: 'askClaude', page: focusedCard.section.page, quote, explanation: true, propose: e.shiftKey });
       return;
     }
     // Alt+K in a note asks about the selected text or the bullet at the cursor, else the whole note;
@@ -1926,7 +1926,7 @@ window.addEventListener(
     if (e.code === 'KeyK' && focusedCard && cardState) {
       e.preventDefault();
       e.stopImmediatePropagation();
-      const ask = { type: 'askClaude', page: focusedCard.section.page, key: focusedCard.key, note: true, quote: questionText(cardState) };
+      const ask = { type: 'askClaude', page: focusedCard.section.page, key: focusedCard.key, note: true, quote: questionText(cardState), propose: e.shiftKey };
       selectedDrawings(cardState).then((drawings) => post({ ...ask, drawings }));
       return;
     }
@@ -1935,7 +1935,7 @@ window.addEventListener(
     if (e.code === 'KeyK' && !focused) {
       e.preventDefault();
       e.stopImmediatePropagation();
-      askClaude();
+      askClaude(e.shiftKey);
       return;
     }
     // Selected text: Alt+Q/W/E/R highlights it (like in notes), with Shift also opens a note on it;

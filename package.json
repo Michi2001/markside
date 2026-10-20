@@ -77,6 +77,12 @@
         "icon": "$(sparkle)"
       },
       {
+        "command": "mdLive.reviewNote",
+        "title": "Review Note with Claude (Alt+Shift+K)",
+        "category": "Markside",
+        "icon": "$(checklist)"
+      },
+      {
         "command": "mdLive.insertDrawing",
         "title": "Insert Handwriting (Alt+D)",
         "category": "Markside",
@@ -183,6 +189,11 @@
           "group": "navigation@2"
         },
         {
+          "command": "mdLive.reviewNote",
+          "when": "activeCustomEditorId == mdLive.editor",
+          "group": "navigation@2"
+        },
+        {
           "command": "mdLive.insertDrawing",
           "when": "activeCustomEditorId == mdLive.editor",
           "group": "navigation@3"
@@ -254,6 +265,10 @@
         },
         {
           "command": "mdLive.sendSelectionToClaude",
+          "when": "activeCustomEditorId == mdLive.editor"
+        },
+        {
+          "command": "mdLive.reviewNote",
           "when": "activeCustomEditorId == mdLive.editor"
         },
         {

@@ -5,6 +5,7 @@ import { type Fold, foldPlugin, getFolds, setFolds, toggleFold } from './fold';
 import { applyInit, handleHostMessage, post } from './host';
 import { type NoteEditor, createNoteEditor, editDrawing, installShortcuts, sendSelection, setActiveEditor } from './noteEditor';
 import { installSearch, refreshSearch, scrollToRect } from './search';
+import { setSuggestions, suggestionPlugin } from './suggestions';
 
 const root = document.getElementById('editor') as HTMLElement;
 // Obsidian-style inline title above the note; editing it renames the file.
@@ -20,7 +21,7 @@ async function createEditor(text: string, folds: Fold[]): Promise<void> {
     root,
     text,
     (markdown) => post({ type: 'edit', text: markdown }),
-    (crepe) => crepe.editor.use(foldPlugin((folds) => post({ type: 'folds', folds }))),
+    (crepe) => crepe.editor.use(foldPlugin((folds) => post({ type: 'folds', folds }))).use(suggestionPlugin),
   );
   setActiveEditor(editor);
   setFolds(editor.view(), folds);
@@ -203,6 +204,12 @@ window.addEventListener('message', async (event) => {
       applyInit(msg);
       setTitle(msg.title);
       await createEditor(msg.text, msg.folds);
+      setSuggestions(editor!.view(), msg.suggestions);
+      break;
+    case 'suggestions':
+      if (editor) {
+        setSuggestions(editor.view(), msg.suggestions);
+      }
       break;
     case 'update': {
       if (!editor) {
@@ -220,6 +227,10 @@ window.addEventListener('message', async (event) => {
       break;
     case 'requestSelection':
       sendSelection();
+      break;
+    case 'requestReview':
+      // The whole note: Claude reviews it and suggests changes.
+      post({ type: 'selection', text: '', propose: true });
       break;
     case 'insertDrawing':
       if (editor && !isDrawingOpen()) {

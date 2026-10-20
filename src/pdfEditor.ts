@@ -41,7 +41,7 @@ type WebviewMessage =
   | { type: 'folds'; folds: Record<string, Fold[]> }
   | { type: 'saveImage'; id: number; name: string; mime: string; data: string }
   | { type: 'selection'; text: string }
-  | { type: 'askClaude'; page: number; quote?: string; rects?: Rect[]; color?: string; key?: string; note?: boolean; explanation?: boolean; drawings?: ClaudeDrawing[] }
+  | { type: 'askClaude'; page: number; quote?: string; rects?: Rect[]; color?: string; key?: string; note?: boolean; explanation?: boolean; drawings?: ClaudeDrawing[]; propose?: boolean }
   | { type: 'view'; page: number; pages: number }
   | { type: 'pageTexts'; texts: string[] }
   | { type: 'deleteExplanation'; page: number }
@@ -566,18 +566,20 @@ export class PdfEditorProvider implements vscode.CustomReadonlyEditorProvider {
           if (note?.isDirty) {
             await note.save();
           }
-          // Every question gets a proposed annotation: in the explanation, in the note (card or mark)
-          // asked about, as a new note on the selected passage, else in the page note.
+          // Alt+Shift+K: the question gets a proposed annotation: in the explanation, in the note (card or
+          // mark) asked about, as a new note on the selected passage, else in the page note.
           const id = `q${Date.now()}`;
           const key = msg.explanation
             ? pageKey(msg.page)
             : (msg.key ?? (msg.rects ? formatAnchor({ page: msg.page, rects: msg.rects, area: false, color: msg.color ?? 'yellow' }) : pageKey(msg.page)));
           const mark = parseSections(note?.getText() ?? '').find((s) => s.key === key && s.anchor && !s.anchor.area);
           const proposal: Proposal = { id, page: msg.page, key, explanation: !!msg.explanation, quote: msg.quote ?? mark?.label ?? '', body: '', replace: false };
-          const kept = (await readProposals()).filter((p) => p.body || Date.now() - Number(p.id.slice(1)) < EMPTY_PROPOSAL_MS);
-          await vscode.workspace.fs.createDirectory(vscode.Uri.joinPath(proposals, '..'));
-          await writeProposals([...kept, proposal]);
-          const context = claudeContext(pdf, note?.getText(), await readExplanations(), msg, { id, file: proposals });
+          if (msg.propose) {
+            const kept = (await readProposals()).filter((p) => p.body || Date.now() - Number(p.id.slice(1)) < EMPTY_PROPOSAL_MS);
+            await vscode.workspace.fs.createDirectory(vscode.Uri.joinPath(proposals, '..'));
+            await writeProposals([...kept, proposal]);
+          }
+          const context = claudeContext(pdf, note?.getText(), await readExplanations(), msg, msg.propose ? { id, file: proposals } : undefined);
           const drawing = (await claudeDrawingLines(notes, msg.drawings ?? [])).join('\n');
           const file = await writeClaudeContext(notes, drawing ? `${context}${drawing}\n` : context);
           await sendSelectionToClaude(await vscode.workspace.openTextDocument(file), panel, '');
@@ -696,6 +698,11 @@ function claudeContext(
       `After answering in the chat, propose an annotation on ${target}: write it into \`${rel(proposal.file)}\`, in section \`## ${proposal.id}\` below ${quote ? 'the quoted line' : 'its heading'} (Edit tool, change nothing else in that file). Once I accept it, it is added to ${where}${quote && bullet ? ' as a sub-bullet below that bullet' : ''}${explanation ? '' : ', marked as written by you'}.${quote && bullet ? ' If I ask you to change, correct or rephrase that bullet instead, write `REPLACE` on its own line followed by the new version of the bullet (in the format below, its sub-bullets included); accepted, it replaces the bullet with its sub-bullets.' : ''}`,
       '',
       `Keep it short: only what your answer adds, in ${getClaudeLanguage()}${getClaudeLanguage() === 'English' ? '' : ' (technical terms in English)'}, no repetition of what it annotates, no heading, no italics (italic text is mine). Format: one short line; when it covers several things (terms, cases, steps, examples), that line as a lead-in followed by a Markdown bullet list, one point per bullet. If the answer adds nothing worth keeping, leave the section empty.`,
+    );
+  } else {
+    lines.push(
+      '', '## Answer only', '',
+      "Only answer in the chat, don't edit any files.",
     );
   }
   return lines.join('\n').trimEnd() + '\n';

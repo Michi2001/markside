@@ -1,7 +1,8 @@
 import * as vscode from 'vscode';
 import { navigationKeys } from './keybindings';
-import { adoptAssets, claudeDrawingLines, cleanupAssets, loadFolds, saveFolds, saveImage, writeClaudeContext } from './assets';
+import { adoptAssets, claudeDrawingLines, cleanupAssets, loadFolds, proposalsUri, saveFolds, saveImage, writeClaudeContext } from './assets';
 import { preserveSource } from './preserve';
+import { type Suggestion, findQuote, parseSuggestions, removeSuggestion, suggestionSource } from './suggestions';
 import { DrawingServer, type DrawingFile, type DrawingTarget, getDrawingDevice } from './drawingServer';
 import type { FontSizes } from './fontSizes';
 import type { Fold } from './webview/fold';
@@ -27,7 +28,9 @@ type WebviewMessage =
   | { type: 'ready' }
   | { type: 'edit'; text: string }
   | { type: 'saveImage'; id: number; name: string; mime: string; data: string }
-  | { type: 'selection'; text: string; drawings?: ClaudeDrawing[] }
+  | { type: 'selection'; text: string; drawings?: ClaudeDrawing[]; propose?: boolean; suggestion?: string }
+  | { type: 'acceptSuggestion'; id: string }
+  | { type: 'rejectSuggestion'; id: string }
   | { type: 'folds'; folds: Fold[] }
   | { type: 'rename'; title: string }
   | { type: 'drawRemote'; id: number; drawing: unknown; src: string | null };
@@ -45,7 +48,7 @@ export class LiveEditorProvider implements vscode.CustomTextEditorProvider {
     private readonly fontSizes: FontSizes,
   ) {}
 
-  postToActivePanel(type: 'requestSelection' | 'insertDrawing'): void {
+  postToActivePanel(type: 'requestSelection' | 'requestReview' | 'insertDrawing'): void {
     if (!this.activePanel) {
       vscode.window.showWarningMessage('No Markside note is active.');
       return;
@@ -99,6 +102,22 @@ export class LiveEditorProvider implements vscode.CustomTextEditorProvider {
       }
     });
 
+    // Changes Claude suggests (Alt+Shift+K), written by Claude into the note's assets folder.
+    const suggestions = proposalsUri(document.uri);
+    const readSuggestions = async (): Promise<Suggestion[]> =>
+      parseSuggestions(await vscode.workspace.fs.readFile(suggestions).then((data) => new TextDecoder().decode(data), () => ''));
+    const sendSuggestions = async (): Promise<void> => {
+      panel.webview.postMessage({ type: 'suggestions', suggestions: await readSuggestions() });
+    };
+    const removeFromFile = async (id: string): Promise<void> => {
+      const text = new TextDecoder().decode(await vscode.workspace.fs.readFile(suggestions));
+      await vscode.workspace.fs.writeFile(suggestions, Buffer.from(removeSuggestion(text, id)));
+    };
+    const suggestionWatcher = vscode.workspace.createFileSystemWatcher(new vscode.RelativePattern(docDir, suggestions.path.slice(docDir.path.length + 1)));
+    suggestionWatcher.onDidCreate(sendSuggestions);
+    suggestionWatcher.onDidChange(sendSuggestions);
+    suggestionWatcher.onDidDelete(sendSuggestions);
+
     const fontSizeSub = this.fontSizes.onDidChange((uri) => {
       if (uri === document.uri.toString()) {
         panel.webview.postMessage({ type: 'fontSize', fontSize: this.fontSizes.get(document.uri) });
@@ -114,6 +133,7 @@ export class LiveEditorProvider implements vscode.CustomTextEditorProvider {
       changeSub.dispose();
       configSub.dispose();
       fontSizeSub.dispose();
+      suggestionWatcher.dispose();
       if (this.activePanel === panel) {
         this.activePanel = undefined;
       }
@@ -139,6 +159,7 @@ export class LiveEditorProvider implements vscode.CustomTextEditorProvider {
             drawingDevice: getDrawingDevice(),
             navigationKeys: navigationKeys(),
             folds: await loadFolds(document.uri, []),
+            suggestions: await readSuggestions(),
           });
           break;
         case 'folds':
@@ -174,17 +195,39 @@ export class LiveEditorProvider implements vscode.CustomTextEditorProvider {
           panel.webview.postMessage({ type: 'drawingSaved', id: msg.id, path });
           break;
         }
-        case 'selection':
+        case 'selection': {
           // Claude reads the file from disk, and closing the temporary text tab of a dirty
           // document would prompt to save, so flush pending edits and save first.
           await editQueue;
           await document.save();
-          if (msg.drawings?.length) {
-            // Claude can't see a drawing from its link (an SVG of strokes), so it gets a context file naming PNGs.
-            await sendSelectionToClaude(await vscode.workspace.openTextDocument(await drawingContext(document, msg.text, msg.drawings)), panel, '');
-          } else {
-            await sendSelectionToClaude(document, panel, msg.text);
+          // Always a context file: it says whether Claude may suggest changes (an earlier Alt+Shift+K in the
+          // same chat must not carry over), names drawings as PNG (Claude can't see an SVG of strokes) and
+          // the PDFs next to the note (a note there is usually a summary of one).
+          const context = await noteContext(document, msg, await siblingPdfs(document.uri), suggestions);
+          await sendSelectionToClaude(await vscode.workspace.openTextDocument(context), panel, '');
+          break;
+        }
+        case 'acceptSuggestion': {
+          const suggestion = (await readSuggestions()).find((s) => s.id === msg.id);
+          if (!suggestion) {
+            break;
           }
+          editQueue = queueEdit(document.uri, async () => {
+            const text = document.getText();
+            const at = findQuote(text, suggestion.quote);
+            if (!at) {
+              vscode.window.showWarningMessage('The text this change replaces is no longer in the note.');
+              await sendSuggestions();
+              return;
+            }
+            const body = document.eol === vscode.EndOfLine.CRLF ? suggestion.body.replace(/\r?\n/g, '\r\n') : suggestion.body;
+            await applyMinimalEdit(document, text.slice(0, at.start) + body + text.slice(at.end));
+            await removeFromFile(suggestion.id);
+          });
+          break;
+        }
+        case 'rejectSuggestion':
+          await removeFromFile(msg.id);
           break;
       }
     });
@@ -355,15 +398,66 @@ function findSourceRange(document: vscode.TextDocument, selected: string): vscod
   return new vscode.Range(startLine, 0, endLine, document.lineAt(endLine).text.length);
 }
 
-// Context for a question about drawings in a note: the note, the selected text and the drawings as PNG.
-async function drawingContext(document: vscode.TextDocument, selected: string, drawings: ClaudeDrawing[]): Promise<vscode.Uri> {
-  const lines = [`# Question about my note \`${vscode.workspace.asRelativePath(document.uri, false)}\``];
+// PDFs in the note's folder (summaries are kept next to their paper).
+async function siblingPdfs(note: vscode.Uri): Promise<vscode.Uri[]> {
+  const dir = vscode.Uri.joinPath(note, '..');
+  const entries = await vscode.workspace.fs.readDirectory(dir);
+  return entries
+    .filter(([name, type]) => type === vscode.FileType.File && name.toLowerCase().endsWith('.pdf'))
+    .map(([name]) => vscode.Uri.joinPath(dir, name));
+}
+
+// Context for a question about a note: the note, the selected text (or the suggestion asked about), the
+// drawings as PNG and the PDFs next to it; with `propose`, how Claude writes changes into `suggestions`.
+async function noteContext(
+  document: vscode.TextDocument,
+  { text: selected, drawings = [], propose, suggestion }: { text: string; drawings?: ClaudeDrawing[]; propose?: boolean; suggestion?: string },
+  pdfs: vscode.Uri[],
+  suggestions: vscode.Uri,
+): Promise<vscode.Uri> {
+  const rel = (uri: vscode.Uri) => vscode.workspace.asRelativePath(uri, false);
+  const lines = [`# Question about my note \`${rel(document.uri)}\``];
   const range = findSourceRange(document, selected);
-  if (selected.trim()) {
+  const source = suggestion && suggestionSource(new TextDecoder().decode(await vscode.workspace.fs.readFile(suggestions)), suggestion);
+  if (source) {
+    const about = selected.trim() ? `this passage of your suggested change \`## ${suggestion}\` (full section below):\n\n> ${selected.trim().replace(/\s+/g, ' ')}` : `your suggested change \`## ${suggestion}\`:`;
+    lines.push('', '## Your suggestion in question', '', `The question is about ${about}`, '', '```markdown', source, '```');
+  } else if (selected.trim()) {
     const where = range ? ` (lines ${range.start.line + 1}–${range.end.line + 1})` : '';
     lines.push('', `## Selected text${where}`, '', ...selected.trim().split('\n').map((line) => `> ${line}`));
   }
   lines.push(...(await claudeDrawingLines(document.uri, drawings)));
+  if (pdfs.length) {
+    lines.push(
+      '', '## Original document', '',
+      'If the note summarizes or annotates a PDF, it is one of these next to it (usually the one with a similar name).',
+      'When in doubt, check the original there with the Read tool (only the relevant pages, via `pages`):', '',
+      ...pdfs.map((pdf) => `- \`${rel(pdf)}\``),
+    );
+  }
+  if (propose) {
+    const task = source
+      ? `Answer in the chat. If the answer changes your suggestion, revise its section \`## ${suggestion}\` in place (delete the section if it turns out wrong).`
+      : selected.trim()
+        ? 'Answer in the chat, and suggest corrections to the selected passage where it needs them.'
+        : `Review the whole note${pdfs.length ? ' against the original' : ''}: is it correct and precise, are there typos, is a central point missing? Give a short overview in the chat and suggest each correction.`;
+    lines.push(
+      '', '## Suggested changes', '', task, '',
+      `Don't edit the note itself: write each change as its own section into \`${rel(suggestions)}\` (create it if missing; leave the other sections alone). I accept or dismiss each one in the note; accepting replaces the quoted text with the replacement. Format:`,
+      '', '```markdown',
+      '## s<n> · <short title>', '',
+      '> <the exact text of the note it replaces, copied verbatim from the Markdown source (with its formatting and list markers), a whole sentence or line; several lines each start with `>`>', '',
+      '<the corrected text in Markdown; for an addition the quoted line followed by the addition; empty to delete the quoted text>', '',
+      'Why: <one short sentence>',
+      '```', '',
+      `Mainly correct what is there (wrong or imprecise statements, misleading wording, typos). Add something only if a central point that really matters is missing entirely; no extra examples or details, and don't expand what I kept short on purpose. \`<n>\` is a number not used yet in that file. The quote must occur exactly once in the note. One section per independent change, so I can take them one by one; write in the note's language. This also holds for my follow-up messages about this note in this conversation.`,
+    );
+  } else {
+    lines.push(
+      '', '## Answer only', '',
+      "Only answer in the chat, don't edit any files.",
+    );
+  }
   return writeClaudeContext(document.uri, lines.join('\n') + '\n');
 }
 

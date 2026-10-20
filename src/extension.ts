@@ -48,6 +48,7 @@ export function activate(context: vscode.ExtensionContext): void {
     vscode.commands.registerCommand('mdLive.sendSelectionToClaude', () =>
       provider.postToActivePanel('requestSelection'),
     ),
+    vscode.commands.registerCommand('mdLive.reviewNote', () => provider.postToActivePanel('requestReview')),
     vscode.commands.registerCommand('mdLive.insertDrawing', () => provider.postToActivePanel('insertDrawing')),
     vscode.commands.registerCommand('mdLive.chooseTheme', chooseTheme),
     // Two variants each, so the editor title shows the state (shown/hidden, running).

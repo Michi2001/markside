@@ -32,7 +32,7 @@ https://github.com/user-attachments/assets/1b1b6b3e-4b06-4faf-919f-758eef49fd7b
 ### Claude Code integration (optional)
 - `Alt+K` sends the selected passage, highlight or page, together with your notes on it, to [Claude Code](https://claude.com/claude-code) as context for a question.
 - Claude can explain slides in advance: every slide gets its key message and a short explanation, shown in the page's note card. Your own additions are kept apart (italics).
-- After answering, Claude proposes a short annotation that you can accept into your notes with one click.
+- With `Alt+Shift+K`, Claude may also change things: in a PDF it proposes a short annotation, in a note it suggests corrections (wrong or imprecise statements, typos, a central point missing entirely; no extra examples or details) shown as cards you apply or dismiss with one click. Without a selection it reviews the whole note, against the PDF next to it if there is one. All of this runs in your Claude Code chat, so follow-up questions keep the context; `Alt+K` on a suggestion card asks about it.
 
 ## Installation
 
@@ -93,6 +93,7 @@ The full manual with all features and settings is in [docs/usage.md](docs/usage.
 | `Tab` / `Shift+Tab` | Indent/outdent list item; in a heading, change its level |
 | `Alt+D` | Insert handwriting |
 | `Alt+K` | Ask Claude Code about the selection |
+| `Alt+Shift+K` | Ask and let Claude suggest changes; without a selection: review the whole note |
 
 Search (notes and PDF text):
 
@@ -112,6 +113,7 @@ In the PDF view (text selected in the PDF):
 | `Alt+Shift+Q` / `W` / `E` / `R`, `Alt+A` | Highlight and open a note (`Alt+A`: random color) |
 | `Alt` + drag | Note on an area of the page (with snapshot) |
 | `Alt+K` | Ask Claude about the selection, the highlight under the pointer or the page |
+| `Alt+Shift+K` | The same, and Claude proposes an annotation |
 | `Delete` (pointer over a highlight), `Shift+Delete` (in a note) | Delete highlight and note |
 | `Cmd+Z` / `Cmd+Shift+Z` (outside notes) | Undo/redo creating and deleting notes |
 | `Ctrl`+wheel / pinch | Zoom pages and notes together |
