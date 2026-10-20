@@ -9,6 +9,7 @@ import { isDrawingOpen } from '../drawing';
 import { type Fold, foldPlugin, getFolds, setFolds, toggleFold } from '../fold';
 import { HIGHLIGHT_COLORS, colorFromStyle } from '../highlight';
 import { applyInit, handleHostMessage, post, saveFile } from '../host';
+import { installSearch, refreshSearch, scrollToRect } from '../search';
 import {
   HIGHLIGHT_KEYS,
   type NoteEditor,
@@ -128,6 +129,8 @@ type PageView = {
   renderedScale: number;
   task?: RenderTask;
   ink?: Grid;
+  // Spans of the rendered text layer, one per text item (search highlights).
+  textDivs?: HTMLElement[];
 };
 
 const viewer = document.getElementById('viewer') as HTMLElement;
@@ -243,7 +246,12 @@ async function renderPage(pv: PageView): Promise<void> {
     pv.ink = inkGrid(pv, canvas);
     scheduleLayout(pv);
   }
-  await new pdfjs.TextLayer({ textContentSource: pv.page.streamTextContent(), container: textLayer, viewport }).render();
+  const layer = new pdfjs.TextLayer({ textContentSource: pv.page.streamTextContent(), container: textLayer, viewport });
+  await layer.render();
+  if (textLayer.isConnected) {
+    pv.textDivs = layer.textDivs;
+    refreshSearch();
+  }
 }
 
 // Cells where the rendered page differs from its most frequent color (text, images, figures). A page
@@ -291,6 +299,7 @@ function fillCells(grid: Grid, c0: number, r0: number, c1: number, r1: number): 
 function releasePage(pv: PageView): void {
   pv.task?.cancel();
   pv.renderedScale = 0;
+  pv.textDivs = undefined;
   pv.pageEl.querySelectorAll('canvas, .textLayer').forEach((el) => el.remove());
 }
 
@@ -1690,6 +1699,101 @@ async function renderNearPages(): Promise<void> {
   }
 }
 window.addEventListener('resize', scheduleScale);
+
+// ---------- Search (Cmd+F) ----------
+
+// Text of a page: its text items concatenated (a line end adds a space), with each item's start,
+// length and baseline (PDF points from the top). Item i is the text layer's span i.
+type PageText = { text: string; starts: number[]; lengths: number[]; ys: number[] };
+type Match = { pv: PageView; info: PageText; from: number; to: number };
+
+const pageTexts = new Map<PageView, Promise<PageText>>();
+
+function pageText(pv: PageView): Promise<PageText> {
+  let text = pageTexts.get(pv);
+  if (!text) {
+    text = pv.page.getTextContent().then((content) => {
+      const viewport = pv.page.getViewport({ scale: 1 });
+      const info: PageText = { text: '', starts: [], lengths: [], ys: [] };
+      for (const item of content.items) {
+        if ('str' in item) {
+          info.starts.push(info.text.length);
+          info.lengths.push(item.str.length);
+          info.ys.push(viewport.convertToViewportPoint(item.transform[4], item.transform[5])[1]);
+          info.text += item.str + (item.hasEOL ? ' ' : '');
+        }
+      }
+      return info;
+    });
+    pageTexts.set(pv, text);
+  }
+  return text;
+}
+
+// Index of the text item containing character `at` (or the last one starting before it).
+function itemAt(info: PageText, at: number): number {
+  let i = 0;
+  while (i + 1 < info.starts.length && info.starts[i + 1] <= at) {
+    i++;
+  }
+  return i;
+}
+
+function textRange(m: Match): Range | undefined {
+  const node = (i: number) => m.pv.textDivs?.[i]?.firstChild;
+  let i = itemAt(m.info, m.from);
+  let start = m.from - m.info.starts[i];
+  // Starts on the space after a line end: begin with the next item.
+  if (start >= m.info.lengths[i]) {
+    i++;
+    start = 0;
+  }
+  const j = itemAt(m.info, m.to - 1);
+  const startNode = node(i);
+  const endNode = node(j);
+  if (!startNode || !endNode) {
+    return undefined;
+  }
+  const range = document.createRange();
+  range.setStart(startNode, start);
+  range.setEnd(endNode, Math.min(m.to - m.info.starts[j], m.info.lengths[j]));
+  return range;
+}
+
+installSearch<Match>({
+  content: viewer,
+  async find(re) {
+    const matches: Match[] = [];
+    const infos = await Promise.all(pages.map(pageText));
+    pages.forEach((pv, n) => {
+      for (const m of infos[n].text.matchAll(re)) {
+        if (m[0]) {
+          matches.push({ pv, info: infos[n], from: m.index, to: m.index + m[0].length });
+        }
+      }
+    });
+    return matches;
+  },
+  range: textRange,
+  reveal(m) {
+    const rect = textRange(m)?.getBoundingClientRect();
+    if (rect?.height) {
+      scrollToRect(rect);
+      return;
+    }
+    // Page not rendered yet: scroll to the item's baseline; the highlight appears once it renders.
+    const y = m.pv.pageEl.getBoundingClientRect().top + m.info.ys[itemAt(m.info, m.from)] * scale;
+    window.scrollBy(0, y - window.innerHeight / 3);
+  },
+  accept(m) {
+    // Selected, so Alt+Q/W/E/R can highlight it right away.
+    const range = textRange(m);
+    if (range) {
+      window.getSelection()?.removeAllRanges();
+      window.getSelection()?.addRange(range);
+    }
+  },
+});
 
 window.addEventListener(
   'keydown',

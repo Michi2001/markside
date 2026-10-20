@@ -1,4 +1,5 @@
 import * as vscode from 'vscode';
+import { navigationKeys } from './keybindings';
 import { adoptAssets, claudeDrawingLines, cleanupAssets, loadFolds, saveFolds, saveImage, writeClaudeContext } from './assets';
 import { preserveSource } from './preserve';
 import { DrawingServer, type DrawingFile, type DrawingTarget, getDrawingDevice } from './drawingServer';
@@ -136,6 +137,7 @@ export class LiveEditorProvider implements vscode.CustomTextEditorProvider {
             fontSize: this.fontSizes.get(document.uri),
             title: noteTitle(document.uri),
             drawingDevice: getDrawingDevice(),
+            navigationKeys: navigationKeys(),
             folds: await loadFolds(document.uri, []),
           });
           break;

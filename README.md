@@ -92,6 +92,16 @@ The full manual with all features and settings is in [docs/usage.md](docs/usage.
 | `Alt+D` | Insert handwriting |
 | `Alt+K` | Ask Claude Code about the selection |
 
+Search (notes and PDF text):
+
+| Shortcut | Action |
+|---|---|
+| `Cmd+F` | Search (prefilled with the selection) |
+| `Enter` / `Shift+Enter` | Next / previous match |
+| `Esc` | Close and jump back to where the search started |
+| `Cmd+Enter` | Close and stay at the match (selected); a click into the document also stays |
+| VS Code's Go Back / Go Forward (`Ctrl+-` / `Ctrl+Shift+-`, or your own bindings) | After the search: jump back to where it started / forward to the match |
+
 In the PDF view (text selected in the PDF):
 
 | Shortcut | Action |

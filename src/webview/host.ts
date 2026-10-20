@@ -12,6 +12,8 @@ export const host = {
   // Setting mdLive.drawingDevice: draw in this webview ('mac') or on the drawing page served by the
   // extension, opened on the iPad ('ipad', 'ipadUsb') or in a browser window on the Mac ('sidecar').
   drawingDevice: 'mac',
+  // VS Code's "Go Back"/"Go Forward" key bindings (search: back to where it started).
+  navigationKeys: { back: [] as string[], forward: [] as string[] },
 };
 
 let counter = 0;
@@ -62,8 +64,15 @@ function setFontSize(size: number): void {
   document.body.style.setProperty('--mdlive-font-scale', `${size / 16}`);
 }
 
-export function applyInit(msg: { baseUri: string; theme: string; fontSize: number; drawingDevice: string }): void {
+export function applyInit(msg: {
+  baseUri: string;
+  theme: string;
+  fontSize: number;
+  drawingDevice: string;
+  navigationKeys: { back: string[]; forward: string[] };
+}): void {
   host.baseUri = msg.baseUri;
+  host.navigationKeys = msg.navigationKeys;
   host.drawingDevice = msg.drawingDevice;
   document.body.dataset.theme = msg.theme;
   setFontSize(msg.fontSize);

@@ -1,0 +1,69 @@
+/* Cmd+F search bar (search.ts), styled like VS Code's find widget. */
+.mdlive-search {
+  position: fixed;
+  top: 0;
+  right: 24px;
+  z-index: 20;
+  display: flex;
+  align-items: center;
+  gap: 2px;
+  padding: 4px 6px;
+  background: var(--vscode-editorWidget-background);
+  color: var(--vscode-editorWidget-foreground, var(--vscode-foreground));
+  border: 1px solid var(--vscode-editorWidget-border, transparent);
+  border-top: none;
+  border-radius: 0 0 4px 4px;
+  box-shadow: 0 0 8px 2px var(--vscode-widget-shadow, rgba(0, 0, 0, 0.3));
+  font-family: var(--vscode-font-family);
+  font-size: 13px;
+}
+
+.mdlive-search input {
+  width: 220px;
+  padding: 3px 6px;
+  background: var(--vscode-input-background);
+  color: var(--vscode-input-foreground);
+  border: 1px solid var(--vscode-input-border, transparent);
+  border-radius: 2px;
+  outline: none;
+  font: inherit;
+}
+
+.mdlive-search input:focus {
+  border-color: var(--vscode-focusBorder);
+}
+
+.mdlive-search.none input {
+  border-color: var(--vscode-inputValidation-errorBorder, #be1100);
+}
+
+.mdlive-search-count {
+  min-width: 70px;
+  padding: 0 6px;
+  white-space: nowrap;
+  opacity: 0.8;
+}
+
+.mdlive-search button {
+  width: 24px;
+  height: 22px;
+  padding: 0;
+  background: none;
+  color: inherit;
+  border: none;
+  border-radius: 3px;
+  font: inherit;
+  cursor: pointer;
+}
+
+.mdlive-search button:hover {
+  background: var(--vscode-toolbar-hoverBackground, rgba(128, 128, 128, 0.2));
+}
+
+::highlight(mdlive-search) {
+  background-color: var(--vscode-editor-findMatchHighlightBackground, rgba(234, 92, 0, 0.33));
+}
+
+::highlight(mdlive-search-current) {
+  background-color: var(--vscode-editor-findMatchBackground, rgba(255, 150, 50, 0.6));
+}

@@ -114,6 +114,16 @@
   background: transparent;
 }
 
+/* Search matches (search.ts): the text layer lies over the rendered page, so they must stay
+   translucent (the theme's find colors may be opaque and would hide the text). */
+.textLayer *::highlight(mdlive-search) {
+  background-color: rgba(255, 200, 0, 0.3);
+}
+
+.textLayer *::highlight(mdlive-search-current) {
+  background-color: rgba(255, 130, 0, 0.45);
+}
+
 .textLayer .endOfContent {
   display: block;
   position: absolute;

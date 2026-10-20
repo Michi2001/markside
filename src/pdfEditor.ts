@@ -1,5 +1,6 @@
 import * as path from 'path';
 import * as vscode from 'vscode';
+import { navigationKeys } from './keybindings';
 import { claudeDrawingLines, cleanupAssets, explanationsUri, loadFolds, notesUri, proposalsUri, saveFolds, saveImage, writeClaudeContext } from './assets';
 import { DrawingServer, getDrawingDevice } from './drawingServer';
 import { type PdfView, explainSlides, getClaudeLanguage, isExplaining } from './explain';
@@ -355,6 +356,7 @@ export class PdfEditorProvider implements vscode.CustomReadonlyEditorProvider {
             fontSize: this.fontSizes.get(pdf),
             notesWidth: getNotesWidth(),
             drawingDevice: getDrawingDevice(),
+            navigationKeys: navigationKeys(),
             sections: sections(),
             dividers: parseDividers(note?.getText() ?? ''),
             explanations: parseExplanations((await readExplanations()) ?? ''),

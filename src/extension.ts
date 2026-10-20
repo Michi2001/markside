@@ -3,10 +3,12 @@ import * as vscode from 'vscode';
 import { registerAssetSync } from './assets';
 import { DrawingServer, getDrawingDevice, usbAddresses } from './drawingServer';
 import { FontSizes } from './fontSizes';
+import { setKeybindingsFile } from './keybindings';
 import { LiveEditorProvider, saveToNote } from './liveEditor';
 import { PdfEditorProvider } from './pdfEditor';
 
 export function activate(context: vscode.ExtensionContext): void {
+  setKeybindingsFile(context.globalStorageUri.fsPath);
   // Persisted so the URL bookmarked on the iPad stays valid.
   let token = context.globalState.get<string>('ipadToken');
   if (!token) {
