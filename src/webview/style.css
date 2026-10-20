@@ -9,6 +9,20 @@ body {
 
 body {
   min-height: 100vh;
+  --mdlive-group-border: var(--vscode-editorGroup-border, rgba(128, 128, 128, 0.35));
+}
+
+/* The webview covers VS Code's border between editor groups side by side, so it draws it itself. */
+body::before {
+  content: '';
+  position: fixed;
+  top: 0;
+  bottom: 0;
+  left: 0;
+  width: 1px;
+  background: var(--mdlive-group-border);
+  pointer-events: none;
+  z-index: 999;
 }
 
 /* Fixed color modes (setting mdLive.theme) override VS Code's theme variables. */
@@ -28,6 +42,7 @@ body[data-theme='light'] {
   --vscode-list-hoverBackground: #f2f2f2;
   --vscode-list-inactiveSelectionBackground: #e4e6f1;
   --vscode-textCodeBlock-background: #f2f2f2;
+  --mdlive-group-border: rgba(0, 0, 0, 0.15);
 }
 
 body[data-theme='dark'] {
@@ -46,6 +61,7 @@ body[data-theme='dark'] {
   --vscode-list-hoverBackground: #2a2d2e;
   --vscode-list-inactiveSelectionBackground: #37373d;
   --vscode-textCodeBlock-background: #2b2b2b;
+  --mdlive-group-border: rgba(255, 255, 255, 0.15);
 }
 
 .milkdown {
