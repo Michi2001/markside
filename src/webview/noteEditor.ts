@@ -9,6 +9,7 @@ import { $prose, callCommand, insert, replaceAll } from '@milkdown/kit/utils';
 import { AI_MARK } from '../sidecar';
 import { type Drawing, drawingFile, drawingPng, imageDrawing, isDrawing, isDrawingOpen, loadDrawing, openDrawingEditor } from './drawing';
 import { setHeading, shiftHeading } from './headings';
+import { dim } from './dim';
 import { highlight } from './highlight';
 import { drawRemotely, host, post, resolveUrl, saveFile, uploadImage } from './host';
 import { createImageBlockView, extendImageBlockSchema, remarkHtmlImages } from './imageView';
@@ -183,7 +184,7 @@ export async function createNoteEditor(
       onChange(markdown);
     });
   });
-  crepe.editor.use(moveBlocksKeymap).use(highlight).use(aiAnnotations);
+  crepe.editor.use(moveBlocksKeymap).use(highlight).use(dim).use(aiAnnotations);
   configure?.(crepe);
   await crepe.create();
   const view = editor.view();
@@ -274,6 +275,7 @@ const FORMAT_COMMANDS: Record<string, string> = {
   KeyS: 'ToggleStrikeThrough',
   KeyC: 'ToggleInlineCode',
   KeyM: 'ToggleLatex',
+  KeyG: 'ToggleDim',
 };
 
 // Alt+<key> highlight colors (see HIGHLIGHT_COLORS in highlight.ts).
@@ -301,11 +303,13 @@ const HEADING_KEYS: Record<string, number> = {
 };
 
 // Runs a formatting command; in lists it applies to the whole item text, then restores the cursor.
-// Highlights (and removing them) only expand to the whole item when nothing is selected.
+// Highlights (and removing them) only expand to the whole item when nothing is selected. In an empty
+// item the format applies to what is typed next (stored marks, which a selection change would drop).
 export function runFormatCommand(editor: NoteEditor, command: string, payload?: unknown): void {
   const view = editor.view();
   const keepSelection = command === 'ToggleLatex' || (['ToggleHighlight', 'RemoveHighlight'].includes(command) && !view.state.selection.empty);
-  const range = keepSelection ? null : listItemRange(view.state);
+  const item = keepSelection ? null : listItemRange(view.state);
+  const range = item && item.from < item.to ? item : null;
   const { anchor, head } = view.state.selection;
   if (range) {
     view.dispatch(view.state.tr.setSelection(TextSelection.create(view.state.doc, range.from, range.to)));

@@ -85,6 +85,7 @@ The full manual with all features and settings is in [docs/usage.md](docs/usage.
 | `Alt+Q` / `Alt+E` / `Alt+R` | Red / green / blue highlight |
 | `Alt+X` | Remove highlights |
 | `Alt+C` / `Alt+M` | Inline code / inline math |
+| `Alt+G` | Gray out less important text (`<span style="color: gray;">`) |
 | `Alt+1` … `Alt+6` | Heading level 1–6 (same level again: back to paragraph) |
 | `Alt+^` | Clear formatting: bold, italic, code, highlights etc. (links stay), headings back to paragraph |
 | `Alt+Y` | Collapse/expand the section or list item at the cursor |
