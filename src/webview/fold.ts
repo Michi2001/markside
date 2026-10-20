@@ -130,18 +130,24 @@ export const foldPlugin = (onChange: (folds: Fold[]) => void) =>
         },
         state: {
           init: () => [],
-          apply(tr, folded, _old, state) {
+          apply(tr, folded, old, state) {
             const meta = tr.getMeta(foldKey) as number | { set: number[] } | undefined;
             if (typeof meta === 'object') {
               return meta.set;
             }
+            // Nodes inside a replaced range (Tab/Alt+Up/Down rebuild the whole list) are found again by text.
+            const lost = folded.filter((pos) => tr.mapping.mapResult(pos).deleted);
+            const before = lost.length > 0 ? foldables(old.doc).filter((f) => lost.includes(f.pos)) : [];
+            const found = before.length > 0 ? foldables(state.doc).filter((f) => before.some((b) => sameFold(b.fold, f.fold))) : [];
             let next = folded
               .map((pos) => tr.mapping.mapResult(pos))
-              .filter((r) => {
-                const node = state.doc.nodeAt(r.pos);
-                return !r.deleted && (isHeading(node) || (isItem(node) && hasSublist(node!)));
-              })
-              .map((r) => r.pos);
+              .filter((r) => !r.deleted)
+              .map((r) => r.pos)
+              .concat(found.map((f) => f.pos))
+              .filter((pos, i, all) => {
+                const node = state.doc.nodeAt(pos);
+                return all.indexOf(pos) === i && (isHeading(node) || (isItem(node) && hasSublist(node!)));
+              });
             if (meta !== undefined) {
               next = next.includes(meta) ? next.filter((pos) => pos !== meta) : [...next, meta];
             }
