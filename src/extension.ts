@@ -2,7 +2,7 @@ import * as crypto from 'crypto';
 import * as vscode from 'vscode';
 import { registerAssetSync } from './assets';
 import { DrawingServer, getDrawingDevice, usbAddresses } from './drawingServer';
-import { FontSizes } from './fontSizes';
+import { type FontSize, FontSizes, isPdf } from './fontSizes';
 import { setKeybindingsFile } from './keybindings';
 import { LiveEditorProvider, saveToNote } from './liveEditor';
 import { PdfEditorProvider } from './pdfEditor';
@@ -162,16 +162,22 @@ async function chooseFontSize(fontSizes: FontSizes): Promise<void> {
   }
   const own = fontSizes.own(input.uri);
   const fallback = vscode.workspace.getConfiguration('mdLive').get<number>('fontSize', 16);
+  // PDFs default to 'auto' (like the PDF's body text), notes to the setting.
   const items = [
-    { label: `Default (${fallback} px)`, description: own === undefined ? 'current' : 'setting mdLive.fontSize', value: undefined },
+    isPdf(input.uri)
+      ? { label: 'Auto (default)', description: own === undefined || own === 'auto' ? 'current' : "like the PDF's body text", value: undefined as FontSize | undefined }
+      : { label: `Default (${fallback} px)`, description: own === undefined ? 'current' : 'setting mdLive.fontSize', value: undefined as FontSize | undefined },
     ...[8, 9, 10, 11, 12, 13, 14, 15, 16, 17, 18, 20, 22, 24].map((size) => ({
       label: `${size} px`,
       description: size === own ? 'current' : '',
-      value: size as number | undefined,
+      value: size as FontSize | undefined,
     })),
   ];
   const name = decodeURIComponent(input.uri.path.split('/').pop()!);
-  const picked = await vscode.window.showQuickPick(items, { placeHolder: `Font size of ${name} (current: ${fontSizes.get(input.uri)} px)` });
+  const current = fontSizes.get(input.uri);
+  const picked = await vscode.window.showQuickPick(items, {
+    placeHolder: `Font size of ${name} (current: ${current === 'auto' ? 'Auto' : `${current} px`})`,
+  });
   if (picked) {
     await fontSizes.set(input.uri, picked.value);
   }

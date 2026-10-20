@@ -14,7 +14,12 @@ export const host = {
   drawingDevice: 'mac',
   // VS Code's "Go Back"/"Go Forward" key bindings (search: back to where it started).
   navigationKeys: { back: [] as string[], forward: [] as string[] },
+  // PDF view: the font size 'auto' stands for (undefined until the PDF is loaded).
+  autoFontSize: undefined as (() => number | undefined) | undefined,
 };
+
+// Font size of the note or PDF; 'auto' (PDFs only) follows `host.autoFontSize`.
+let fontSize: number | 'auto' = 16;
 
 let counter = 0;
 const pendingUploads = new Map<number, (path: string) => void>();
@@ -58,7 +63,13 @@ export function drawRemotely(drawing: Drawing, src?: string): Promise<string | n
   return new Promise((resolve) => pendingDrawings.set(id, resolve));
 }
 
-function setFontSize(size: number): void {
+function setFontSize(value: number | 'auto'): void {
+  fontSize = value;
+  applyFontSize();
+}
+
+export function applyFontSize(): void {
+  const size = fontSize === 'auto' ? (host.autoFontSize?.() ?? 16) : fontSize;
   document.body.style.setProperty('--mdlive-font-size', `${size}px`);
   // Unitless, for sizes calc() can't derive from a length (Crepe's toolbar).
   document.body.style.setProperty('--mdlive-font-scale', `${size / 16}`);
@@ -67,7 +78,7 @@ function setFontSize(size: number): void {
 export function applyInit(msg: {
   baseUri: string;
   theme: string;
-  fontSize: number;
+  fontSize: number | 'auto';
   drawingDevice: string;
   navigationKeys: { back: string[]; forward: string[] };
 }): void {

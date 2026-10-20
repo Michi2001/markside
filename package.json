@@ -333,7 +333,7 @@
           "default": 16,
           "minimum": 8,
           "maximum": 40,
-          "description": "Default font size of notes (px) at 100 % zoom; headings and code scale with it. 'Choose Font Size' sets a size for a single note or PDF."
+          "description": "Default font size of notes (px) at 100 % zoom; headings and code scale with it. PDFs default to 'Auto' (like the PDF's body text). 'Choose Font Size' sets a size for a single note or PDF."
         },
         "mdLive.pdfNotesWidth": {
           "type": "number",

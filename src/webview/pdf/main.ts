@@ -8,7 +8,7 @@ import { type Anchor, type Divider, type Proposal, type Rect, type Section, form
 import { isDrawingOpen } from '../drawing';
 import { type Fold, foldPlugin, getFolds, setFolds, toggleFold } from '../fold';
 import { HIGHLIGHT_COLORS, colorFromStyle } from '../highlight';
-import { applyInit, handleHostMessage, post, saveFile } from '../host';
+import { applyFontSize, applyInit, handleHostMessage, host, post, saveFile } from '../host';
 import { installSearch, refreshSearch, scrollToRect } from '../search';
 import {
   HIGHLIGHT_KEYS,
@@ -46,6 +46,11 @@ const MIN_ZOOM_SCALE = 0.1;
 const MAX_ZOOM_SCALE = 8;
 const SNAPSHOT_SCALE = 2.5;
 const RENDER_DELAY_MS = 200;
+// Pages whose text decides the PDF's body text size (font size 'auto').
+const BODY_SAMPLE_PAGES = 20;
+// Range of the 'auto' font size (px): slides have huge body text, papers tiny text.
+const AUTO_FONT_MIN = 11;
+const AUTO_FONT_MAX = 18;
 const COLORS = ['yellow', 'red', 'green', 'blue'];
 // Free space on a page: grid cells of CELL points, occupied where the rendered page differs from its
 // background, grown by INK_PAD cells so cards keep a distance from the content.
@@ -380,11 +385,31 @@ async function loadPdf(url: string): Promise<void> {
   }
   scale = fitScale();
   pages.forEach(sizePage);
+  // Font size 'auto': the body text as shown at zoom 1 when the PDF is opened; zooming then scales
+  // the notes like any other size.
+  const body = await bodyFontSize();
+  host.autoFontSize = () => (body ? clamp(Math.round(body * baseScale() * 2) / 2, AUTO_FONT_MIN, AUTO_FONT_MAX) : undefined);
+  applyFontSize();
   applySections(latestSections);
   applyExplanations(explanations);
   applyDividers(dividers);
   pages.forEach((pv) => pageObserver.observe(pv.row));
   reportView();
+}
+
+// Font size (PDF points) of most characters: the PDF's body text (headings, footnotes etc. are rarer).
+async function bodyFontSize(): Promise<number | undefined> {
+  const chars = new Map<number, number>();
+  for (const pv of pages.slice(0, BODY_SAMPLE_PAGES)) {
+    for (const item of (await pv.page.getTextContent()).items) {
+      if ('str' in item) {
+        const size = Math.round(Math.hypot(item.transform[2], item.transform[3]) * 2) / 2;
+        chars.set(size, (chars.get(size) ?? 0) + item.str.replace(/\s/g, '').length);
+      }
+    }
+  }
+  const best = [...chars].filter(([size, n]) => size > 0 && n > 0).sort((a, b) => b[1] - a[1])[0];
+  return best?.[0];
 }
 
 // ---------- Notes ----------
