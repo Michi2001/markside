@@ -56,10 +56,11 @@ function words(text: string): Set<string> {
   );
 }
 
-// After the textblock sharing most words with the quoted source (the source has Markdown syntax,
-// the document rendered text), else at the end of the note.
+// After the textblock containing most words of the quote's last line (the quote is Markdown source,
+// the document rendered text; a quote spanning several blocks ends there), else at the end of the note.
 function anchorPos(doc: ProseNode, quote: string): number {
-  const wanted = words(quote);
+  const lines = quote.split('\n').map(words).filter((w) => w.size > 0);
+  const wanted = lines[lines.length - 1] ?? new Set<string>();
   let best = doc.content.size;
   let bestScore = 0.5;
   doc.descendants((node, pos) => {
@@ -67,9 +68,7 @@ function anchorPos(doc: ProseNode, quote: string): number {
       return true;
     }
     const have = words(node.textContent);
-    const hits = [...wanted].filter((w) => have.has(w)).length;
-    // A quote spanning several blocks covers each of them.
-    const score = Math.max(hits / (wanted.size || 1), hits / (have.size || 1));
+    const score = [...wanted].filter((w) => have.has(w)).length / (wanted.size || 1);
     if (score > bestScore) {
       bestScore = score;
       best = pos + node.nodeSize;
