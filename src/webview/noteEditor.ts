@@ -28,6 +28,21 @@ export type NoteEditor = {
 
 let active: NoteEditor | undefined;
 
+// OneNote-style bullets: one shape per nesting level (`.mdlive-b1`..`.mdlive-b9`, picked in style.css),
+// `ring` marks a collapsed item.
+const BULLET_ICON = `<svg xmlns="http://www.w3.org/2000/svg" width="24" height="24" viewBox="0 0 24 24">
+  <circle class="ring" cx="12" cy="12" r="7.5" />
+  <rect class="mdlive-b1" x="8.5" y="11.25" width="6" height="1.5" />
+  <circle class="mdlive-b2" cx="12" cy="12" r="2.6" fill="none" stroke="currentColor" stroke-width="1.2" />
+  <rect class="mdlive-b3" x="9.75" y="9.75" width="4.5" height="4.5" />
+  <rect class="mdlive-b4" x="8.9" y="8.9" width="6.2" height="6.2" fill="none" stroke="currentColor" stroke-width="1.2" />
+  <path class="mdlive-b5" d="M12 7.6 16.4 12 12 16.4 7.6 12Z" />
+  <path class="mdlive-b6" d="M12 8 16 12 12 16 8 12Z" fill="none" stroke="currentColor" stroke-width="1.2" />
+  <path class="mdlive-b7" d="M9.5 8 15.5 12 9.5 16Z" />
+  <rect class="mdlive-b8" x="6.5" y="11.25" width="11" height="1.5" />
+  <path class="mdlive-b9" d="M12 9 15 12 12 15 9 12Z" />
+</svg>`;
+
 // Annotations accepted from Claude start with AI_MARK; they are shown in Claude's color (a bullet
 // with its sub-bullets).
 const aiAnnotations = $prose(
@@ -128,6 +143,7 @@ export async function createNoteEditor(
     featureConfigs: {
       [Crepe.Feature.Placeholder]: placeholder ? { text: placeholder, mode: 'doc' } : {},
       [Crepe.Feature.ImageBlock]: { onUpload: uploadImage, proxyDomURL: resolveUrl },
+      [Crepe.Feature.ListItem]: { bulletIcon: BULLET_ICON },
       [Crepe.Feature.BlockEdit]: {
         buildMenu: (builder) => {
           builder.getGroup('advanced').addItem('handwriting', {

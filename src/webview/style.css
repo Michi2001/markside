@@ -324,12 +324,35 @@ body[data-theme='dark'] {
   filter: brightness(1.15);
 }
 
+/* OneNote-style bullets: the shape of BULLET_ICON (noteEditor.ts) for the item's nesting level; deeper
+   rules are more specific and win. */
+.milkdown-list-item-block > .list-item > .label-wrapper .bullet [class^='mdlive-b'] { display: none; }
+.milkdown-list-item-block > .list-item > .label-wrapper .bullet .mdlive-b1 { display: inline; }
+.milkdown-list-item-block .milkdown-list-item-block > .list-item > .label-wrapper .bullet [class^='mdlive-b'] { display: none; }
+.milkdown-list-item-block .milkdown-list-item-block > .list-item > .label-wrapper .bullet .mdlive-b2 { display: inline; }
+.milkdown-list-item-block .milkdown-list-item-block .milkdown-list-item-block > .list-item > .label-wrapper .bullet [class^='mdlive-b'] { display: none; }
+.milkdown-list-item-block .milkdown-list-item-block .milkdown-list-item-block > .list-item > .label-wrapper .bullet .mdlive-b3 { display: inline; }
+.milkdown-list-item-block .milkdown-list-item-block .milkdown-list-item-block .milkdown-list-item-block > .list-item > .label-wrapper .bullet [class^='mdlive-b'] { display: none; }
+.milkdown-list-item-block .milkdown-list-item-block .milkdown-list-item-block .milkdown-list-item-block > .list-item > .label-wrapper .bullet .mdlive-b4 { display: inline; }
+.milkdown-list-item-block .milkdown-list-item-block .milkdown-list-item-block .milkdown-list-item-block .milkdown-list-item-block > .list-item > .label-wrapper .bullet [class^='mdlive-b'] { display: none; }
+.milkdown-list-item-block .milkdown-list-item-block .milkdown-list-item-block .milkdown-list-item-block .milkdown-list-item-block > .list-item > .label-wrapper .bullet .mdlive-b5 { display: inline; }
+.milkdown-list-item-block .milkdown-list-item-block .milkdown-list-item-block .milkdown-list-item-block .milkdown-list-item-block .milkdown-list-item-block > .list-item > .label-wrapper .bullet [class^='mdlive-b'] { display: none; }
+.milkdown-list-item-block .milkdown-list-item-block .milkdown-list-item-block .milkdown-list-item-block .milkdown-list-item-block .milkdown-list-item-block > .list-item > .label-wrapper .bullet .mdlive-b6 { display: inline; }
+.milkdown-list-item-block .milkdown-list-item-block .milkdown-list-item-block .milkdown-list-item-block .milkdown-list-item-block .milkdown-list-item-block .milkdown-list-item-block > .list-item > .label-wrapper .bullet [class^='mdlive-b'] { display: none; }
+.milkdown-list-item-block .milkdown-list-item-block .milkdown-list-item-block .milkdown-list-item-block .milkdown-list-item-block .milkdown-list-item-block .milkdown-list-item-block > .list-item > .label-wrapper .bullet .mdlive-b7 { display: inline; }
+.milkdown-list-item-block .milkdown-list-item-block .milkdown-list-item-block .milkdown-list-item-block .milkdown-list-item-block .milkdown-list-item-block .milkdown-list-item-block .milkdown-list-item-block > .list-item > .label-wrapper .bullet [class^='mdlive-b'] { display: none; }
+.milkdown-list-item-block .milkdown-list-item-block .milkdown-list-item-block .milkdown-list-item-block .milkdown-list-item-block .milkdown-list-item-block .milkdown-list-item-block .milkdown-list-item-block > .list-item > .label-wrapper .bullet .mdlive-b8 { display: inline; }
+.milkdown-list-item-block .milkdown-list-item-block .milkdown-list-item-block .milkdown-list-item-block .milkdown-list-item-block .milkdown-list-item-block .milkdown-list-item-block .milkdown-list-item-block .milkdown-list-item-block > .list-item > .label-wrapper .bullet [class^='mdlive-b'] { display: none; }
+.milkdown-list-item-block .milkdown-list-item-block .milkdown-list-item-block .milkdown-list-item-block .milkdown-list-item-block .milkdown-list-item-block .milkdown-list-item-block .milkdown-list-item-block .milkdown-list-item-block > .list-item > .label-wrapper .bullet .mdlive-b9 { display: inline; }
+
+.milkdown .milkdown-list-item-block .bullet .ring {
+  display: none;
+}
+
 /* Collapsed list item: ring around its bullet (Workflowy/Logseq style). */
-.milkdown .ProseMirror .mdlive-collapsed-item > .list-item > .label-wrapper .bullet circle {
-  fill: var(--crepe-color-on-background);
-  stroke: var(--crepe-color-outline);
-  stroke-opacity: 0.45;
-  stroke-width: 7px;
+.milkdown .ProseMirror .mdlive-collapsed-item > .list-item > .label-wrapper .bullet .ring {
+  display: inline;
+  fill-opacity: 0.3;
 }
 
 /* VS Code's default webview CSS gives blockquotes its own (theme) background and border. */
