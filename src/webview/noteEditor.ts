@@ -288,11 +288,10 @@ export const HIGHLIGHT_KEYS: Record<string, string> = {
 // Alt+X removes highlights (any color).
 export const REMOVE_HIGHLIGHT_KEY = 'KeyX';
 
-// Alt+<key> heading levels; 0 = back to text. The key left of 1 (^ on German Macs) reports
+// Alt+<key> heading levels. The key left of 1 (^ on German Macs, clears formatting) reports
 // IntlBackslash or Backquote depending on the keyboard, so both are accepted.
+const CLEAR_KEYS = ['Backquote', 'IntlBackslash'];
 const HEADING_KEYS: Record<string, number> = {
-  Backquote: 0,
-  IntlBackslash: 0,
   Digit1: 1,
   Digit2: 2,
   Digit3: 3,
@@ -316,6 +315,26 @@ export function runFormatCommand(editor: NoteEditor, command: string, payload?: 
     view.dispatch(view.state.tr.setSelection(TextSelection.create(view.state.doc, anchor, head)));
   }
   view.focus();
+}
+
+// Alt+^: removes all formatting (marks except links, headings become text) from the selection; with
+// only a cursor from the whole list item or block.
+function clearFormatting(view: EditorView): void {
+  const { state } = view;
+  const { selection } = state;
+  const { from, to } = selection.empty ? (listItemRange(state) ?? { from: selection.$from.start(), to: selection.$from.end() }) : selection;
+  const tr = state.tr;
+  for (const mark of Object.values(state.schema.marks)) {
+    if (mark.name !== 'link') {
+      tr.removeMark(from, to, mark);
+    }
+  }
+  tr.doc.nodesBetween(from, to, (node, pos) => {
+    if (node.type.name === 'heading') {
+      tr.setNodeMarkup(pos, state.schema.nodes.paragraph);
+    }
+  });
+  view.dispatch(tr.setStoredMarks([]));
 }
 
 // Handled on the window (not as a ProseMirror keymap) so Alt+M also works while the formula tooltip
@@ -362,6 +381,11 @@ export function installShortcuts(ignore: (e: KeyboardEvent) => boolean): void {
         e.preventDefault();
         e.stopPropagation();
         runFormatCommand(editor, 'ToggleHighlight', HIGHLIGHT_KEYS[e.code]);
+      } else if (CLEAR_KEYS.includes(e.code)) {
+        e.preventDefault();
+        e.stopPropagation();
+        clearFormatting(editor.view());
+        editor.view().focus();
       } else if (e.code in HEADING_KEYS) {
         e.preventDefault();
         e.stopPropagation();

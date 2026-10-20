@@ -1,12 +1,12 @@
 import { setBlockType } from '@milkdown/kit/prose/commands';
 import type { EditorView } from '@milkdown/kit/prose/view';
 
-// Alt+1..6: turns the selected blocks into headings of `level`; the same level again (or level 0) turns them back into text.
+// Alt+1..6: turns the selected blocks into headings of `level`; the same level again turns them back into text.
 export function setHeading(view: EditorView, level: number): void {
   const { state } = view;
   const { heading, paragraph } = state.schema.nodes;
   const parent = state.selection.$from.parent;
-  const toText = level === 0 || (parent.type === heading && parent.attrs.level === level);
+  const toText = parent.type === heading && parent.attrs.level === level;
   const command = toText ? setBlockType(paragraph) : setBlockType(heading, { level });
   command(state, view.dispatch);
 }

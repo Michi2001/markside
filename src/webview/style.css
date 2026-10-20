@@ -192,6 +192,13 @@ body[data-theme='dark'] {
   background: var(--vscode-editor-selectionBackground);
 }
 
+/* Translucent in highlights, so their color still shows through the selection. */
+/* (More specific than Crepe's opaque `.milkdown .ProseMirror *::selection`.) */
+.milkdown .ProseMirror mark::selection,
+.milkdown .ProseMirror mark *::selection {
+  background: color-mix(in srgb, var(--vscode-editor-selectionBackground) 45%, transparent);
+}
+
 /* Resizable images (OneNote-style corner handles). */
 .milkdown .mdlive-image {
   margin: 8px 0;
