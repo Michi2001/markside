@@ -64,6 +64,11 @@ body[data-theme='dark'] {
   --mdlive-group-border: rgba(255, 255, 255, 0.15);
 }
 
+/* Room below the last line (notes only), so new text is written in the middle of the window. */
+#editor {
+  padding-bottom: 50vh;
+}
+
 .milkdown {
   --crepe-color-background: var(--vscode-editor-background);
   --crepe-color-on-background: var(--vscode-editor-foreground);

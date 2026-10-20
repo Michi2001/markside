@@ -33,6 +33,17 @@ function setTitle(text: string): void {
   titlebar.textContent = text;
 }
 
+// A click into the empty room below the note puts the cursor at its end.
+root.addEventListener('mousedown', (e) => {
+  if (e.target !== root || !editor) {
+    return;
+  }
+  e.preventDefault();
+  const view = editor.view();
+  view.dispatch(view.state.tr.setSelection(Selection.atEnd(view.state.doc)));
+  view.focus();
+});
+
 new IntersectionObserver(([entry]) => titlebar.classList.toggle('visible', !entry.isIntersecting)).observe(title);
 
 titlebar.addEventListener('mousedown', (e) => {
