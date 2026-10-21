@@ -2,7 +2,7 @@ import { Crepe } from '@milkdown/crepe';
 import '@milkdown/crepe/theme/common/style.css';
 import { imageBlockSchema } from '@milkdown/kit/component/image-block';
 import { commandsCtx, editorViewCtx, remarkPluginsCtx, remarkStringifyOptionsCtx } from '@milkdown/kit/core';
-import { clearTextInCurrentBlockCommand } from '@milkdown/kit/preset/commonmark';
+import { clearTextInCurrentBlockCommand, listItemSchema } from '@milkdown/kit/preset/commonmark';
 import { type EditorState, Plugin, TextSelection } from '@milkdown/kit/prose/state';
 import { Decoration, DecorationSet, type EditorView } from '@milkdown/kit/prose/view';
 import { $prose, callCommand, insert, replaceAll } from '@milkdown/kit/utils';
@@ -174,6 +174,12 @@ export async function createNoteEditor(
     ctx.update(remarkStringifyOptionsCtx, (prev) => ({ ...prev, bullet: '-' as const }));
     ctx.update(remarkPluginsCtx, (prev) => [...prev, remarkHtmlImages]);
     ctx.update(imageBlockSchema.key, extendImageBlockSchema);
+    // Milkdown creates new list items as loose (`spread: true`), so an item that gets a sublist was
+    // saved with a blank line before it. Parsed items keep the spread of their Markdown.
+    ctx.update(listItemSchema.key, (prev) => (c) => {
+      const base = prev(c);
+      return { ...base, attrs: { ...base.attrs, spread: { default: false, validate: 'boolean' } } };
+    });
   });
   crepe.on((listener) => {
     listener.markdownUpdated((_ctx, markdown) => {
