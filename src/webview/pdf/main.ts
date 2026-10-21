@@ -1103,11 +1103,15 @@ function layoutRow(pv: PageView): void {
       reserve(card);
     }
   }
+  // Right edge of the notes column, in points: cards sticking out into the column extend up to it.
+  const edge = pv.width + (GAP + parseFloat(pv.margin.style.width) * z) / scale;
   for (const card of trying) {
     const sizes = PAGE_CARD_WIDTHS.map((w, i) => ({ w, wPt: toPoints(w), hPt: toPoints(heightsAt[i].get(card)!) }));
-    card.place = placeOnPage(pv, grid!, card.section.anchor!, sizes, boxes);
-    if (card.place) {
-      heights.set(card, heightsAt[PAGE_CARD_WIDTHS.indexOf(card.place.w)].get(card)!);
+    const spot = placeOnPage(pv, grid!, card.section.anchor!, sizes, boxes, edge);
+    card.place = spot && { x: spot.x, y: spot.y, w: (spot.wPt * scale) / z };
+    if (spot) {
+      // Height at the tried width; a widened card is lower, so its reserved cells are on the safe side.
+      heights.set(card, heightsAt[PAGE_CARD_WIDTHS.indexOf(spot.w)].get(card)!);
       reserve(card);
     }
   }
@@ -1117,7 +1121,7 @@ function layoutRow(pv: PageView): void {
     card.el.style.width = '';
   });
   rowCards.forEach((card) => card.place && (card.el.style.width = `${card.place.w}px`));
-  margin.forEach((card) => heights.set(card, card.el.offsetHeight));
+  rowCards.forEach((card) => heights.set(card, card.el.offsetHeight));
 
   // Cards sticking out of the page into the column: margin cards go above or below them.
   const overhangs = rowCards
@@ -1202,14 +1206,16 @@ function alongLine([x0, y0, x1, y1]: [number, number, number, number], visit: (c
 
 // Free spot (PDF points) closest to the mark for a card in one of its `sizes` (`w` in column units,
 // `wPt`/`hPt` in points) whose connector crosses neither content nor other cards (`boxes`), or null
-// when there is none closer than the margin.
+// when there is none closer than the margin. A card sticking out into the notes column is widened up
+// to the column's right `edge` (returned `wPt`), so it doesn't stay a narrow strip next to free space.
 function placeOnPage(
   pv: PageView,
   grid: Grid,
   anchor: Anchor,
   sizes: { w: number; wPt: number; hPt: number }[],
   boxes: Box[],
-): { x: number; y: number; w: number } | null {
+  edge: number,
+): { x: number; y: number; w: number; wPt: number } | null {
   const { cols, rows, cells, raw } = grid;
   // Summed-area table: occupied cells in any rectangle in constant time.
   const sum = new Int32Array((cols + 1) * (rows + 1));
@@ -1231,7 +1237,7 @@ function placeOnPage(
     card.x1 <= pv.width || !boxes.some((b) => b.x1 > pv.width && b.x0 < card.x1 && card.x0 < b.x1 && b.y0 < card.y1 && card.y0 < b.y1);
   // The margin starts at the page's right edge; a spot farther away than that is no gain.
   let best = Math.min(pv.width - mark.x1 + GAP / scale, MAX_PAGE_DISTANCE * Math.max(pv.width, pv.height));
-  let place: { x: number; y: number; w: number } | null = null;
+  let place: { x: number; y: number; w: number; wPt: number } | null = null;
   for (const { w, wPt, hPt } of sizes) {
     const cost = (PAGE_CARD_WIDTHS[0] - w) * NARROW_COST;
     const cw = Math.ceil(wPt / CELL);
@@ -1249,10 +1255,11 @@ function placeOnPage(
         const c1 = Math.min(c + cw, cols);
         const used = () =>
           sum[(r + ch) * (cols + 1) + c1] - sum[r * (cols + 1) + c1] - sum[(r + ch) * (cols + 1) + c] + sum[r * (cols + 1) + c];
-        const box = { x0: x, y0: y, x1: x + wPt, y1: y + hPt };
+        const x1 = x + wPt > pv.width + GAP / scale ? Math.max(x + wPt, edge) : x + wPt;
+        const box = { x0: x, y0: y, x1, y1: y + hPt };
         if (d < best && used() === 0 && clearOutside(box) && clearLine(box)) {
           best = d;
-          place = { x, y, w };
+          place = { x, y, w, wPt: x1 - x };
         }
       }
     }
