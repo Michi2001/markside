@@ -104,6 +104,11 @@ body[data-theme='dark'] {
   padding: 8px 40px 40px;
 }
 
+.milkdown .ProseMirror :is(h1, h2, h3, h4, h5, h6) {
+  color: var(--vscode-textLink-foreground);
+  font-weight: 700;
+}
+
 /* Inline title (file name), styled like Crepe's h1 and aligned with the note's text. */
 #title {
   box-sizing: border-box;
