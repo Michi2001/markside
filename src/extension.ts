@@ -45,6 +45,8 @@ export function activate(context: vscode.ExtensionContext): void {
     vscode.commands.registerCommand('mdLive.openAsText', (uri?: vscode.Uri) =>
       switchEditor(uri, 'default'),
     ),
+    vscode.commands.registerCommand('mdLive.nextEditorInGroup', () => switchTab(1, 'workbench.action.nextEditorInGroup')),
+    vscode.commands.registerCommand('mdLive.previousEditorInGroup', () => switchTab(-1, 'workbench.action.previousEditorInGroup')),
     vscode.commands.registerCommand('mdLive.sendSelectionToClaude', () =>
       provider.postToActivePanel('requestSelection'),
     ),
@@ -190,6 +192,22 @@ function tabUri(tab: vscode.Tab | undefined): vscode.Uri | undefined {
     return input.uri;
   }
   return undefined;
+}
+
+// VS Code's next/previous editor commands open the tab without options, and a custom editor then
+// fails with "could not be opened" (CustomEditorInput.applyOptions reads `options.selection`).
+// Custom editor tabs are opened with options instead; everything else goes to the built-in command.
+async function switchTab(offset: number, builtIn: string): Promise<void> {
+  const group = vscode.window.tabGroups.activeTabGroup;
+  const tab = group.tabs[group.tabs.findIndex((t) => t.isActive) + offset];
+  if (!(tab?.input instanceof vscode.TabInputCustom)) {
+    await vscode.commands.executeCommand(builtIn);
+    return;
+  }
+  await vscode.commands.executeCommand('vscode.openWith', tab.input.uri, tab.input.viewType, {
+    viewColumn: group.viewColumn,
+    preview: tab.isPreview,
+  });
 }
 
 // Replaces the active tab with the same file opened in another editor type.

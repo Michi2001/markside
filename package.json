@@ -71,6 +71,16 @@
         "icon": "$(code)"
       },
       {
+        "command": "mdLive.nextEditorInGroup",
+        "title": "Open Next Editor in Group (works for notes and PDFs)",
+        "category": "Markside"
+      },
+      {
+        "command": "mdLive.previousEditorInGroup",
+        "title": "Open Previous Editor in Group (works for notes and PDFs)",
+        "category": "Markside"
+      },
+      {
         "command": "mdLive.sendSelectionToClaude",
         "title": "Send Selection to Claude (Alt+K)",
         "category": "Markside",
