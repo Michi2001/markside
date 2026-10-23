@@ -3,7 +3,7 @@ import '@milkdown/crepe/theme/common/style.css';
 import { imageBlockSchema } from '@milkdown/kit/component/image-block';
 import { commandsCtx, editorViewCtx, remarkPluginsCtx, remarkStringifyOptionsCtx } from '@milkdown/kit/core';
 import { clearTextInCurrentBlockCommand, listItemSchema } from '@milkdown/kit/preset/commonmark';
-import { type EditorState, Plugin, TextSelection } from '@milkdown/kit/prose/state';
+import { type EditorState, NodeSelection, Plugin, TextSelection } from '@milkdown/kit/prose/state';
 import { Decoration, DecorationSet, type EditorView } from '@milkdown/kit/prose/view';
 import { $prose, callCommand, insert, replaceAll } from '@milkdown/kit/utils';
 import { AI_MARK } from '../sidecar';
@@ -204,6 +204,28 @@ export async function createNoteEditor(
   lastSynced = crepe.getMarkdown();
 
   root.addEventListener('focusin', () => (active = editor));
+  // Crepe's formula tooltip stays open as long as the formula is selected: Escape or a click outside
+  // it closes it, keeping what was typed.
+  root.addEventListener(
+    'keydown',
+    (e) => {
+      if (e.key === 'Escape' && closeFormula(editor, true)) {
+        e.preventDefault();
+        e.stopPropagation();
+      }
+    },
+    true,
+  );
+  document.addEventListener(
+    'pointerdown',
+    (e) => {
+      const target = e.target as Element;
+      if (!target.closest?.('.milkdown-latex-inline-edit') && !target.closest?.('.ProseMirror-selectednode')) {
+        closeFormula(editor, false);
+      }
+    },
+    true,
+  );
   root.addEventListener(
     'paste',
     (e) => {
@@ -236,6 +258,26 @@ export async function createNoteEditor(
     true,
   );
   return editor;
+}
+
+// Moves the cursor behind a selected inline formula, which hides its tooltip, and stores the
+// tooltip's text. Returns false if no formula is selected.
+function closeFormula(editor: NoteEditor, focus: boolean): boolean {
+  const view = editor.view();
+  const { selection } = view.state;
+  if (!(selection instanceof NodeSelection) || selection.node.type.name !== 'math_inline') {
+    return false;
+  }
+  const input = editor.root.querySelector('.milkdown-latex-inline-edit[data-show="true"] .ProseMirror');
+  const tr = view.state.tr;
+  if (input && input.textContent !== selection.node.attrs.value) {
+    tr.setNodeAttribute(selection.from, 'value', input.textContent);
+  }
+  view.dispatch(tr.setSelection(TextSelection.create(tr.doc, selection.to)));
+  if (focus) {
+    view.focus();
+  }
+  return true;
 }
 
 // Inside a bullet list the shortcuts act on the whole text of the touched items, even if only part
