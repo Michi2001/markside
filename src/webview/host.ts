@@ -68,8 +68,13 @@ function setFontSize(value: number | 'auto'): void {
   applyFontSize();
 }
 
+// Font size of the notes in px (CSS px of the notes column in the PDF view).
+export function noteFontSize(): number {
+  return fontSize === 'auto' ? (host.autoFontSize?.() ?? 16) : fontSize;
+}
+
 export function applyFontSize(): void {
-  const size = fontSize === 'auto' ? (host.autoFontSize?.() ?? 16) : fontSize;
+  const size = noteFontSize();
   document.body.style.setProperty('--mdlive-font-size', `${size}px`);
   // Unitless, for sizes calc() can't derive from a length (Crepe's toolbar).
   document.body.style.setProperty('--mdlive-font-scale', `${size / 16}`);

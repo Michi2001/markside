@@ -8,7 +8,7 @@ import { type Anchor, type Divider, type Proposal, type Rect, type Section, form
 import { isDrawingOpen } from '../drawing';
 import { type Fold, foldPlugin, getFolds, setFolds, toggleFold } from '../fold';
 import { HIGHLIGHT_COLORS, colorFromStyle } from '../highlight';
-import { applyFontSize, applyInit, handleHostMessage, host, post, saveFile } from '../host';
+import { applyFontSize, applyInit, handleHostMessage, host, noteFontSize, post, saveFile } from '../host';
 import { installSearch, refreshSearch, scrollToRect } from '../search';
 import {
   HIGHLIGHT_KEYS,
@@ -30,11 +30,12 @@ import './pdf.css';
 // Every page has a page note card (empty until written); marks without a note are plain highlights
 // and only get a card while it is being edited.
 
-// The notes column fills the space right of the page up to the window edge, at least MIN_NOTES_WIDTH
-// (in the column's own units); fitting the pages leaves notesWidth (setting mdLive.pdfNotesWidth) for
+// The notes column fills the space right of the page up to the window edge, at least MIN_NOTES_EM
+// times the note font size (in the column's own units, so zoomed in cards don't become narrow strips
+// with a few words per line that hang far below the page); fitting the pages leaves notesWidth (setting mdLive.pdfNotesWidth) for
 // it at 100 %. Zooming magnifies the notes like the pages (CSS zoom on the column, `notesZoom`), so the
 // note's font size stays its size at 100 %.
-const MIN_NOTES_WIDTH = 200;
+const MIN_NOTES_EM = 20;
 const GAP = 24;
 // Left and right padding of #viewer.
 const VIEWER_PADDING = 48 + 24;
@@ -207,7 +208,7 @@ function sizePage(pv: PageView): void {
   pv.pageEl.style.height = `${pv.height * scale}px`;
   pv.pageEl.style.setProperty('--total-scale-factor', String(scale));
   const free = viewer.clientWidth - VIEWER_PADDING - GAP - pv.width * scale;
-  pv.margin.style.width = `${Math.max(MIN_NOTES_WIDTH, free / notesZoom())}px`;
+  pv.margin.style.width = `${Math.max(MIN_NOTES_EM * noteFontSize(), free / notesZoom())}px`;
   pv.margin.style.zoom = String(notesZoom());
 }
 
@@ -390,6 +391,8 @@ async function loadPdf(url: string): Promise<void> {
   const body = await bodyFontSize();
   host.autoFontSize = () => (body ? clamp(Math.round(body * baseScale() * 2) / 2, AUTO_FONT_MIN, AUTO_FONT_MAX) : undefined);
   applyFontSize();
+  // Again with the final font size: the notes column's minimum width depends on it.
+  pages.forEach(sizePage);
   applySections(latestSections);
   applyExplanations(explanations);
   applyDividers(dividers);
@@ -1966,6 +1969,10 @@ installShortcuts(() => !getActiveEditor());
 window.addEventListener('message', async (event) => {
   const msg = event.data;
   if (handleHostMessage(msg)) {
+    // The notes column's minimum width follows the font size.
+    if (msg.type === 'fontSize' && pages.length) {
+      applyScale();
+    }
     return;
   }
   switch (msg.type) {
