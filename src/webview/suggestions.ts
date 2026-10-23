@@ -36,7 +36,7 @@ function build(doc: ProseNode): DecorationSet {
   return DecorationSet.create(
     doc,
     suggestions.map((s) =>
-      Decoration.widget(anchorPos(doc, s.quote), (view) => card(view, s), {
+      Decoration.widget(anchorPos(doc, s), (view) => card(view, s), {
         side: 1,
         ignoreSelection: true,
         stopEvent: () => true,
@@ -58,24 +58,32 @@ function words(text: string): Set<string> {
 
 // After the textblock containing most words of the quote's last line (the quote is Markdown source,
 // the document rendered text; a quote spanning several blocks ends there), else at the end of the note.
-function anchorPos(doc: ProseNode, quote: string): number {
+// Of equally good blocks (the same text twice) the one whose place in the note is closest to where
+// the extension found the quote (`position`, share of the source lines).
+function anchorPos(doc: ProseNode, { quote, position }: Suggestion): number {
   const lines = quote.split('\n').map(words).filter((w) => w.size > 0);
   const wanted = lines[lines.length - 1] ?? new Set<string>();
-  let best = doc.content.size;
-  let bestScore = 0.5;
+  const blocks: { end: number; score: number }[] = [];
   doc.descendants((node, pos) => {
     if (!node.isTextblock) {
       return true;
     }
     const have = words(node.textContent);
-    const score = [...wanted].filter((w) => have.has(w)).length / (wanted.size || 1);
-    if (score > bestScore) {
-      bestScore = score;
-      best = pos + node.nodeSize;
-    }
+    blocks.push({ end: pos + node.nodeSize, score: [...wanted].filter((w) => have.has(w)).length / (wanted.size || 1) });
     return false;
   });
-  return best;
+  const top = Math.max(...blocks.map((b) => b.score));
+  if (!(top > 0.5)) {
+    return doc.content.size;
+  }
+  const distance = (i: number) => (position === undefined ? i : Math.abs((i + 0.5) / blocks.length - position));
+  let best = -1;
+  blocks.forEach((b, i) => {
+    if (b.score === top && (best === -1 || distance(i) < distance(best))) {
+      best = i;
+    }
+  });
+  return blocks[best].end;
 }
 
 const escape = (t: string) => t.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;');

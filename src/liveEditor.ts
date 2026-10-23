@@ -2,7 +2,7 @@ import * as vscode from 'vscode';
 import { navigationKeys } from './keybindings';
 import { adoptAssets, claudeDrawingLines, cleanupAssets, loadFolds, proposalsUri, saveFolds, saveImage, writeClaudeContext } from './assets';
 import { preserveSource } from './preserve';
-import { type Suggestion, findQuote, parseSuggestions, removeSuggestion, suggestionSource } from './suggestions';
+import { type Suggestion, findQuote, lineAt, parseSuggestions, removeSuggestion, suggestionSource } from './suggestions';
 import { DrawingServer, type DrawingFile, type DrawingTarget, getDrawingDevice } from './drawingServer';
 import type { FontSizes } from './fontSizes';
 import type { Fold } from './webview/fold';
@@ -106,8 +106,17 @@ export class LiveEditorProvider implements vscode.CustomTextEditorProvider {
     const suggestions = proposalsUri(document.uri);
     const readSuggestions = async (): Promise<Suggestion[]> =>
       parseSuggestions(await vscode.workspace.fs.readFile(suggestions).then((data) => new TextDecoder().decode(data), () => ''));
+    // With where each quote ends in the note, so the card goes to the right one of several equal blocks.
+    const placedSuggestions = async (): Promise<Suggestion[]> => {
+      const text = document.getText();
+      const lineCount = lineAt(text, text.length);
+      return (await readSuggestions()).map((s) => {
+        const at = findQuote(text, s.quote, s.line);
+        return at ? { ...s, position: lineAt(text, at.end) / lineCount } : s;
+      });
+    };
     const sendSuggestions = async (): Promise<void> => {
-      panel.webview.postMessage({ type: 'suggestions', suggestions: await readSuggestions() });
+      panel.webview.postMessage({ type: 'suggestions', suggestions: await placedSuggestions() });
     };
     const removeFromFile = async (id: string): Promise<void> => {
       const text = new TextDecoder().decode(await vscode.workspace.fs.readFile(suggestions));
@@ -159,7 +168,7 @@ export class LiveEditorProvider implements vscode.CustomTextEditorProvider {
             drawingDevice: getDrawingDevice(),
             navigationKeys: navigationKeys(),
             folds: await loadFolds(document.uri, []),
-            suggestions: await readSuggestions(),
+            suggestions: await placedSuggestions(),
           });
           break;
         case 'folds':
@@ -214,7 +223,7 @@ export class LiveEditorProvider implements vscode.CustomTextEditorProvider {
           }
           editQueue = queueEdit(document.uri, async () => {
             const text = document.getText();
-            const at = findQuote(text, suggestion.quote);
+            const at = findQuote(text, suggestion.quote, suggestion.line);
             if (!at) {
               vscode.window.showWarningMessage('The text this change replaces is no longer in the note.');
               await sendSuggestions();
@@ -445,12 +454,12 @@ async function noteContext(
       '', '## Suggested changes', '', task, '',
       `Don't edit the note itself: write each change as its own section into \`${rel(suggestions)}\` (create it if missing; leave the other sections alone). I accept or dismiss each one in the note; accepting replaces the quoted text with the replacement. Format:`,
       '', '```markdown',
-      '## s<n> · <short title>', '',
+      '## s<n> · line <L> · <short title>', '',
       '> <the exact text of the note it replaces, copied verbatim from the Markdown source (with its formatting and list markers), a whole sentence or line; several lines each start with `>`>', '',
       '<the corrected text in Markdown; for an addition the quoted line followed by the addition; empty to delete the quoted text>', '',
       'Why: <one short sentence>',
       '```', '',
-      `Mainly correct what is there (wrong or imprecise statements, misleading wording, typos). Add something only if a central point that really matters is missing entirely; no extra examples or details, and don't expand what I kept short on purpose. \`<n>\` is a number not used yet in that file. The quote must occur exactly once in the note. One section per independent change, so I can take them one by one; write in the note's language. This also holds for my follow-up messages about this note in this conversation.`,
+      `Mainly correct what is there (wrong or imprecise statements, misleading wording, typos). Add something only if a central point that really matters is missing entirely; no extra examples or details, and don't expand what I kept short on purpose. \`<n>\` is a number not used yet in that file; \`<L>\` is the line of the note where the quote starts (as the Read tool numbers it), it decides which occurrence is meant when the quoted text appears more than once. One section per independent change, so I can take them one by one; write in the note's language. This also holds for my follow-up messages about this note in this conversation.`,
     );
   } else {
     lines.push(
