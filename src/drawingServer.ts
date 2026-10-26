@@ -3,6 +3,7 @@ import * as fs from 'fs';
 import * as http from 'http';
 import * as os from 'os';
 import * as vscode from 'vscode';
+import { showWaiting } from './waiting';
 
 // Serves the drawing page (dist/ipad.js) to an iPad in the local network. The page listens for
 // drawing requests via server-sent events and posts the finished file back. All URLs live under
@@ -221,16 +222,9 @@ export class DrawingServer implements vscode.Disposable {
     if (sidecar) {
       this.showOnSidecar();
     }
-    return Promise.resolve(
-      vscode.window.withProgress(
-        { location: vscode.ProgressLocation.Notification, title, cancellable: true },
-        (_progress, cancel) => {
-          cancel.onCancellationRequested(() => this.cancel());
-          // The idle timeout counts from the end of the request.
-          return this.request(drawing, target).finally(() => this.server && this.start());
-        },
-      ),
-    );
+    // The idle timeout counts from the end of the request.
+    const result = this.request(drawing, target).finally(() => this.server && this.start());
+    return showWaiting(title, () => this.cancel(), result);
   }
 
   // Connects the iPad via Sidecar if needed and makes sure the drawing page is open on it.

@@ -4,6 +4,7 @@ import * as path from 'path';
 import * as vscode from 'vscode';
 import { explanationsUri } from './assets';
 import { type Divider, parseExplanations } from './sidecar';
+import { showWaiting } from './waiting';
 
 // Slides explained per run by default.
 const CHUNK = 10;
@@ -175,22 +176,21 @@ async function run(pdf: vscode.Uri, file: vscode.Uri, prompt: string, onRunningC
   child.stderr.on('data', (d) => (stderr += d));
   child.stdin.end(prompt);
 
-  await vscode.window.withProgress(
-    { location: vscode.ProgressLocation.Notification, title: `Claude is explaining slides of ${path.basename(pdf.fsPath)}…`, cancellable: true },
-    (_, token) =>
-      new Promise<void>((resolve) => {
-        token.onCancellationRequested(() => child.kill());
-        child.on('error', (e) => {
-          vscode.window.showWarningMessage(`Could not start Claude Code (claude): ${e.message}`);
-          resolve();
-        });
-        child.on('close', (code, signal) => {
-          if (code !== 0 && !signal) {
-            vscode.window.showWarningMessage(`Claude stopped explaining (exit code ${code}): ${stderr.slice(-300)}`);
-          }
-          resolve();
-        });
-      }),
+  await showWaiting(
+    `Claude is explaining slides of ${path.basename(pdf.fsPath)}…`,
+    () => child.kill(),
+    new Promise<void>((resolve) => {
+      child.on('error', (e) => {
+        vscode.window.showWarningMessage(`Could not start Claude Code (claude): ${e.message}`);
+        resolve();
+      });
+      child.on('close', (code, signal) => {
+        if (code !== 0 && !signal) {
+          vscode.window.showWarningMessage(`Claude stopped explaining (exit code ${code}): ${stderr.slice(-300)}`);
+        }
+        resolve();
+      });
+    }),
   );
   running.delete(key);
   onRunningChange();

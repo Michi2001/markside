@@ -6,6 +6,7 @@ import { type FontSize, FontSizes, isPdf } from './fontSizes';
 import { setKeybindingsFile } from './keybindings';
 import { LiveEditorProvider, saveToNote } from './liveEditor';
 import { PdfEditorProvider } from './pdfEditor';
+import { registerWaiting } from './waiting';
 
 export function activate(context: vscode.ExtensionContext): void {
   setKeybindingsFile(context.globalStorageUri.fsPath);
@@ -66,6 +67,7 @@ export function activate(context: vscode.ExtensionContext): void {
     // One variant per device, so the editor title shows the current device's icon.
     ...DEVICES.map((d) => vscode.commands.registerCommand(`mdLive.chooseDrawingDevice.${d.value}`, chooseDrawingDevice)),
     ...registerDeviceStatus(),
+    registerWaiting(),
     vscode.commands.registerCommand('mdLive.showIpadUrl', () => showIpadUrl(drawingServer)),
     vscode.commands.registerCommand('mdLive.renewIpadUrl', async () => {
       const token = crypto.randomBytes(16).toString('hex');
