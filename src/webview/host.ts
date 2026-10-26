@@ -24,6 +24,7 @@ let fontSize: number | 'auto' = 16;
 let counter = 0;
 const pendingUploads = new Map<number, (path: string) => void>();
 const pendingDrawings = new Map<number, (path: string | null) => void>();
+const pendingClipboard = new Map<number, (text: string) => void>();
 
 export function post(msg: unknown): void {
   vscode.postMessage(msg);
@@ -61,6 +62,13 @@ export function drawRemotely(drawing: Drawing, src?: string): Promise<string | n
   const id = ++counter;
   vscode.postMessage({ type: 'drawRemote', id, drawing, src: src ?? null });
   return new Promise((resolve) => pendingDrawings.set(id, resolve));
+}
+
+// The clipboard's plain text, read by the extension (webviews can't read the clipboard on demand).
+export function readClipboard(): Promise<string> {
+  const id = ++counter;
+  vscode.postMessage({ type: 'readClipboard', id });
+  return new Promise((resolve) => pendingClipboard.set(id, resolve));
 }
 
 function setFontSize(value: number | 'auto'): void {
@@ -109,6 +117,10 @@ export function handleHostMessage(msg: any): boolean {
     case 'drawingSaved':
       pendingDrawings.get(msg.id)?.(msg.path);
       pendingDrawings.delete(msg.id);
+      return true;
+    case 'clipboardText':
+      pendingClipboard.get(msg.id)?.(msg.text);
+      pendingClipboard.delete(msg.id);
       return true;
     case 'imageSaved':
       pendingUploads.get(msg.id)?.(msg.path);

@@ -11,7 +11,7 @@ import { type Drawing, drawingFile, drawingPng, imageDrawing, isDrawing, isDrawi
 import { setHeading, shiftHeading } from './headings';
 import { dim } from './dim';
 import { highlight } from './highlight';
-import { drawRemotely, host, post, resolveUrl, saveFile, uploadImage } from './host';
+import { drawRemotely, host, post, readClipboard, resolveUrl, saveFile, uploadImage } from './host';
 import { createImageBlockView, extendImageBlockSchema, remarkHtmlImages } from './imageView';
 import { indentListItems, moveBlocksKeymap } from './moveBlocks';
 import './style.css';
@@ -416,6 +416,13 @@ export function installShortcuts(ignore: (e: KeyboardEvent) => boolean): void {
           e.preventDefault();
           e.stopPropagation();
         }
+        return;
+      }
+      // Cmd+Shift+V: paste without formatting (ProseMirror's plain text paste: one paragraph per line).
+      if (e.code === 'KeyV' && e.metaKey && e.shiftKey && !e.altKey && !e.ctrlKey && !inCodeBlock) {
+        e.preventDefault();
+        e.stopPropagation();
+        readClipboard().then((text) => editor.view().pasteText(text));
         return;
       }
       if (!e.altKey || e.metaKey || e.ctrlKey) {

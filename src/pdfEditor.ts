@@ -40,6 +40,7 @@ type WebviewMessage =
   | { type: 'undo'; redo: boolean }
   | { type: 'folds'; folds: Record<string, Fold[]> }
   | { type: 'saveImage'; id: number; name: string; mime: string; data: string }
+  | { type: 'readClipboard'; id: number }
   | { type: 'selection'; text: string }
   | { type: 'askClaude'; page: number; quote?: string; rects?: Rect[]; color?: string; key?: string; note?: boolean; explanation?: boolean; drawings?: ClaudeDrawing[]; propose?: boolean }
   | { type: 'view'; page: number; pages: number }
@@ -539,6 +540,9 @@ export class PdfEditorProvider implements vscode.CustomReadonlyEditorProvider {
           break;
         case 'folds':
           queue(() => saveFolds(notes, msg.folds));
+          break;
+        case 'readClipboard':
+          panel.webview.postMessage({ type: 'clipboardText', id: msg.id, text: await vscode.env.clipboard.readText() });
           break;
         case 'saveImage': {
           const relPath = await saveImage(notes, msg.name, msg.mime, msg.data);

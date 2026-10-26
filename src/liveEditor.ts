@@ -28,6 +28,7 @@ type WebviewMessage =
   | { type: 'ready' }
   | { type: 'edit'; text: string }
   | { type: 'saveImage'; id: number; name: string; mime: string; data: string }
+  | { type: 'readClipboard'; id: number }
   | { type: 'selection'; text: string; drawings?: ClaudeDrawing[]; propose?: boolean; suggestion?: string }
   | { type: 'acceptSuggestion'; id: string }
   | { type: 'rejectSuggestion'; id: string }
@@ -192,6 +193,9 @@ export class LiveEditorProvider implements vscode.CustomTextEditorProvider {
           if (!(await renameNote(document, msg.title))) {
             panel.webview.postMessage({ type: 'title', title: noteTitle(document.uri) });
           }
+          break;
+        case 'readClipboard':
+          panel.webview.postMessage({ type: 'clipboardText', id: msg.id, text: await vscode.env.clipboard.readText() });
           break;
         case 'saveImage': {
           const relPath = await saveImage(document.uri, msg.name, msg.mime, msg.data);
