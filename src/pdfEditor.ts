@@ -1,12 +1,13 @@
 import * as path from 'path';
 import * as vscode from 'vscode';
 import { navigationKeys } from './keybindings';
-import { claudeDrawingLines, cleanupAssets, explanationsUri, loadFolds, notesUri, proposalsUri, saveFolds, saveImage, writeClaudeContext } from './assets';
+import { claudeDrawingLines, cleanupAssets, explanationsUri, loadFolds, notesUri, proposalsUri, saveFolds, saveImage, suggestionsUri, writeClaudeContext } from './assets';
 import { DrawingServer, getDrawingDevice } from './drawingServer';
 import { type PdfView, explainSlides, getClaudeLanguage, isExplaining } from './explain';
 import type { FontSizes } from './fontSizes';
 import { applyAdopted, applyMinimalEdit, getTheme, queueEdit, sendSelectionToClaude } from './liveEditor';
 import { preserveSource } from './preserve';
+import { type PdfSuggestion, findQuote, lineAt, parsePdfSuggestions, removeSuggestion } from './suggestions';
 import {
   type Anchor,
   type Divider,
@@ -51,6 +52,8 @@ type WebviewMessage =
   | { type: 'deleteDivider'; after: number }
   | { type: 'acceptProposal'; id: string }
   | { type: 'rejectProposal'; id: string }
+  | { type: 'acceptSuggestion'; id: string }
+  | { type: 'rejectSuggestion'; id: string }
   | { type: 'drawRemote'; id: number; drawing: unknown; src: string | null };
 
 const SAVE_DELAY_MS = 800;
@@ -300,6 +303,34 @@ export class PdfEditorProvider implements vscode.CustomReadonlyEditorProvider {
       sendProposals();
     };
 
+    // Corrections Claude suggests for notes and explanations (written on disk by Claude, like the note's).
+    const suggestions = suggestionsUri(notes);
+    const readSuggestions = async (): Promise<PdfSuggestion[]> => ((await exists(suggestions)) ? parsePdfSuggestions(await readText(suggestions)) : []);
+    // The text a suggestion changes: the page's explanation or the note's body.
+    const targetText = async (s: PdfSuggestion): Promise<string | undefined> =>
+      s.explanation
+        ? pageExplanation(parseExplanations((await readExplanations()) ?? ''), s.page) || undefined
+        : parseSections(note?.getText() ?? '').find((n) => n.key === s.key)?.body;
+    // `position` places the card among repeated text in that note or explanation.
+    const placedSuggestions = async (): Promise<PdfSuggestion[]> =>
+      Promise.all(
+        (await readSuggestions()).map(async (s) => {
+          const body = (await targetText(s)) ?? '';
+          const at = findQuote(body, s.quote);
+          return at ? { ...s, position: lineAt(body, at.end) / lineAt(body, body.length) } : s;
+        }),
+      );
+    const sendSuggestions = async (): Promise<void> => {
+      panel.webview.postMessage({ type: 'suggestions', suggestions: await placedSuggestions() });
+    };
+    const suggestionWatcher = vscode.workspace.createFileSystemWatcher(new vscode.RelativePattern(docDir, path.relative(docDir.path, suggestions.path)));
+    suggestionWatcher.onDidCreate(sendSuggestions);
+    suggestionWatcher.onDidChange(sendSuggestions);
+    suggestionWatcher.onDidDelete(sendSuggestions);
+    const removeSuggestionFromFile = async (id: string): Promise<void> => {
+      await vscode.workspace.fs.writeFile(suggestions, Buffer.from(removeSuggestion(await readText(suggestions), id)));
+    };
+
     const configSub = vscode.workspace.onDidChangeConfiguration((e) => {
       if (e.affectsConfiguration('mdLive.theme')) {
         panel.webview.postMessage({ type: 'theme', theme: getTheme() });
@@ -328,6 +359,7 @@ export class PdfEditorProvider implements vscode.CustomReadonlyEditorProvider {
       changeSub.dispose();
       watcher.dispose();
       proposalWatcher.dispose();
+      suggestionWatcher.dispose();
       viewStateSub.dispose();
       if (this.active === view) {
         this.active = undefined;
@@ -366,6 +398,7 @@ export class PdfEditorProvider implements vscode.CustomReadonlyEditorProvider {
             expandExplanations: getExpandExplanations(),
             folds: await loadFolds(notes, {}),
             proposals: await filledProposals(),
+            suggestions: await placedSuggestions(),
           });
           break;
         case 'editNote':
@@ -434,7 +467,7 @@ export class PdfEditorProvider implements vscode.CustomReadonlyEditorProvider {
                 if (parseSections(result).find((s) => s.key === step.note!.key)?.body === from) {
                   result = setNoteBody(result, step.note.key, to);
                 } else {
-                  vscode.window.showWarningMessage('The note changed meanwhile; the annotation was not undone.');
+                  vscode.window.showWarningMessage('The note changed meanwhile; the change was not undone.');
                 }
               }
               return step.dividers ? setDividers(result, msg.redo ? step.dividers.after : step.dividers.before) : result;
@@ -499,7 +532,7 @@ export class PdfEditorProvider implements vscode.CustomReadonlyEditorProvider {
             if (proposal.explanation) {
               const text = (await readExplanations()) ?? '';
               const old = pageExplanation(parseExplanations(text), proposal.page);
-              const after = setExplanation(text, proposal.page, insertAnnotation(old, proposal.quote, proposal.body, { mark: false, replace: proposal.replace }));
+              const after = setExplanation(text, proposal.page, insertAnnotation(old, proposal.quote, proposal.body, false));
               if (after === text) {
                 vscode.window.showWarningMessage(`Page ${proposal.page} has no explanation to add the annotation to.`);
                 return;
@@ -511,7 +544,7 @@ export class PdfEditorProvider implements vscode.CustomReadonlyEditorProvider {
               const before = parseSections(note?.getText() ?? '').find((s) => s.key === proposal.key)?.body;
               if (before === undefined && !proposal.key.startsWith('page:')) {
                 // A selected passage without a mark yet: a new note on it.
-                const data = { anchor: parseAnchor(proposal.key), label: proposal.quote, body: insertAnnotation('', '', proposal.body, { mark: true, replace: false }) };
+                const data = { anchor: parseAnchor(proposal.key), label: proposal.quote, body: insertAnnotation('', '', proposal.body, true) };
                 await write((text) => addNote(text, data.anchor, data.label, data.body));
                 undoStack.push({ added: [data], removed: [] });
                 redoStack.length = 0;
@@ -519,7 +552,7 @@ export class PdfEditorProvider implements vscode.CustomReadonlyEditorProvider {
                 await removeProposal(proposal.id);
                 return;
               }
-              const after = insertAnnotation(before ?? '', proposal.quote, proposal.body, { mark: true, replace: proposal.replace });
+              const after = insertAnnotation(before ?? '', proposal.quote, proposal.body, true);
               await write((text) => setNoteBody(text, proposal.key, after));
               undoStack.push({ added: [], removed: [], note: { key: proposal.key, before: before ?? '', after } });
               redoStack.length = 0;
@@ -531,6 +564,39 @@ export class PdfEditorProvider implements vscode.CustomReadonlyEditorProvider {
           break;
         case 'rejectProposal':
           queue(() => removeProposal(msg.id));
+          break;
+        case 'acceptSuggestion':
+          queue(async () => {
+            const s = (await readSuggestions()).find((x) => x.id === msg.id);
+            if (!s) {
+              return;
+            }
+            const before = await targetText(s);
+            const at = before === undefined ? undefined : findQuote(before, s.quote);
+            if (before === undefined || !at) {
+              vscode.window.showWarningMessage(`The text this change replaces is no longer in the ${s.explanation ? 'explanation' : 'note'}.`);
+              await sendSuggestions();
+              return;
+            }
+            const after = before.slice(0, at.start) + s.body + before.slice(at.end);
+            if (s.explanation) {
+              const text = (await readExplanations()) ?? '';
+              const next = setExplanation(text, s.page, after);
+              undoStack.push({ added: [], removed: [], explanations: { before: text, after: next } });
+              redoStack.length = 0;
+              await vscode.workspace.fs.writeFile(explanations, Buffer.from(next));
+            } else {
+              await write((text) => setNoteBody(text, s.key, after));
+              undoStack.push({ added: [], removed: [], note: { key: s.key, before, after } });
+              redoStack.length = 0;
+              echo.delete(s.key);
+              sendNotes([s.key]);
+            }
+            await removeSuggestionFromFile(s.id);
+          });
+          break;
+        case 'rejectSuggestion':
+          queue(() => removeSuggestionFromFile(msg.id));
           break;
         case 'editDivider':
           await view.editDivider(msg.after);
@@ -577,13 +643,13 @@ export class PdfEditorProvider implements vscode.CustomReadonlyEditorProvider {
             ? pageKey(msg.page)
             : (msg.key ?? (msg.rects ? formatAnchor({ page: msg.page, rects: msg.rects, area: false, color: msg.color ?? 'yellow' }) : pageKey(msg.page)));
           const mark = parseSections(note?.getText() ?? '').find((s) => s.key === key && s.anchor && !s.anchor.area);
-          const proposal: Proposal = { id, page: msg.page, key, explanation: !!msg.explanation, quote: msg.quote ?? mark?.label ?? '', body: '', replace: false };
+          const proposal: Proposal = { id, page: msg.page, key, explanation: !!msg.explanation, quote: msg.quote ?? mark?.label ?? '', body: '' };
           if (msg.propose) {
             const kept = (await readProposals()).filter((p) => p.body || Date.now() - Number(p.id.slice(1)) < EMPTY_PROPOSAL_MS);
             await vscode.workspace.fs.createDirectory(vscode.Uri.joinPath(proposals, '..'));
             await writeProposals([...kept, proposal]);
           }
-          const context = claudeContext(pdf, note?.getText(), await readExplanations(), msg, msg.propose ? { id, file: proposals } : undefined);
+          const context = claudeContext(pdf, note?.getText(), await readExplanations(), msg, msg.propose ? { id, file: proposals, suggestions } : undefined);
           const drawing = (await claudeDrawingLines(notes, msg.drawings ?? [])).join('\n');
           const file = await writeClaudeContext(notes, drawing ? `${context}${drawing}\n` : context);
           await sendSelectionToClaude(await vscode.workspace.openTextDocument(file), panel, '');
@@ -631,7 +697,7 @@ function claudeContext(
   notesText: string | undefined,
   explanationsText: string | undefined,
   { page, quote, rects, key, note, explanation }: { page: number; quote?: string; rects?: Rect[]; key?: string; note?: boolean; explanation?: boolean },
-  proposal?: { id: string; file: vscode.Uri },
+  proposal?: { id: string; file: vscode.Uri; suggestions: vscode.Uri },
 ): string {
   const rel = (uri: vscode.Uri) => vscode.workspace.asRelativePath(uri, false);
   const sections = parseSections(notesText ?? '').filter((s) => s.page === page && (s.anchor || s.body.trim()));
@@ -695,13 +761,33 @@ function claudeContext(
     const bullet = explanation || note;
     const target = quote ? (bullet ? 'the bullet in question' : 'the marked passage') : explanation ? 'your explanation' : note || mark ? 'my note' : `page ${page}`;
     const where = explanation ? 'your explanation' : mark || note ? 'my note' : quote ? 'my notes as a note on that passage' : `my note on page ${page}`;
+    // How Claude names the text a correction changes (heading of its section).
+    const own = explanation ? `page ${page} · explanation` : note && mark ? `page ${page} · note ${mark.key}` : undefined;
     lines.push(
       '',
       '## Proposed annotation',
       '',
-      `After answering in the chat, propose an annotation on ${target}: write it into \`${rel(proposal.file)}\`, in section \`## ${proposal.id}\` below ${quote ? 'the quoted line' : 'its heading'} (Edit tool, change nothing else in that file). Once I accept it, it is added to ${where}${quote && bullet ? ' as a sub-bullet below that bullet' : ''}${explanation ? '' : ', marked as written by you'}.${quote && bullet ? ' If I ask you to change, correct or rephrase that bullet instead, write `REPLACE` on its own line followed by the new version of the bullet (in the format below, its sub-bullets included); accepted, it replaces the bullet with its sub-bullets.' : ''}`,
+      `After answering in the chat, propose an annotation on ${target}: write it into \`${rel(proposal.file)}\`, in section \`## ${proposal.id}\` below ${quote ? 'the quoted line' : 'its heading'} (Edit tool, change nothing else in that file). Once I accept it, it is added to ${where}${quote && bullet ? ' as a sub-bullet below that bullet' : ''}${explanation ? '' : ', marked as written by you'}.`,
       '',
       `Keep it short, much shorter than your chat answer: only the core of what your answer adds, in as few words as possible, in the terse style of notes (no full explanation, the detail stays in the chat), in ${getClaudeLanguage()}${getClaudeLanguage() === 'English' ? '' : ' (technical terms in English)'}, no repetition of what it annotates, no heading, no italics (italic text is mine). Format: one short line; when it covers several things (terms, cases, steps, examples), that line as a lead-in followed by a Markdown bullet list, one point per bullet. If the answer adds nothing worth keeping, leave the section empty.`,
+      '',
+      '## Corrections',
+      '',
+      `If I ask you to correct or check ${quote ? 'the passage in question' : 'something'} (my note or your explanation) instead of asking a question, don't propose an annotation (leave \`## ${proposal.id}\` empty). Write each correction as its own section into \`${rel(proposal.suggestions)}\` (create it if missing; leave the other sections alone). I accept or dismiss each one; accepting replaces the quoted text with the replacement. Format:`,
+      '',
+      '```markdown',
+      '## s<n> · page <P> · <target> · <short title>',
+      '',
+      '> <the exact text it replaces, copied verbatim from the Markdown source of that note or explanation shown above (with its formatting and list markers), a whole sentence or line; several lines each start with `>`>',
+      '',
+      '<the corrected text in Markdown; empty to delete the quoted text>',
+      '',
+      'Why: <one short sentence>',
+      '```',
+      '',
+      `\`<n>\` is a number not used yet in that file. \`page <P> · <target>\` names the text changed: \`page <P> · explanation\` for your explanation of page P, \`page <P> · note <key>\` for my note, where the key is \`page:<P>\` for the page note \`## Page <P>\` and the anchor after \`#\` for a note \`### [label](#<anchor>)\`${own ? ` (the one in question: \`${own}\`)` : ''}.`,
+      '',
+      `Only correct what is clearly wrong (wrong statements, formulas, terms or names; check against the PDF). No rewording, no style changes, no additions or extra details: when in doubt, leave it. Keep each replacement as short as the text it replaces, in its language and terse style. One section per independent change. If nothing is wrong, say so in the chat and write no section. This also holds for my follow-up messages in this conversation.`,
     );
   } else {
     lines.push(

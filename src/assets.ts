@@ -13,7 +13,9 @@ const FOLDS_FILE = '.folds.json';
 const CLAUDE_FILE = '.claude.md';
 // Annotations Claude proposes on a question about a bullet (accepted or rejected in the PDF view).
 const PROPOSALS_FILE = '.proposals.md';
-const KEEP_FILES = [FOLDS_FILE, CLAUDE_FILE, PROPOSALS_FILE];
+// Corrections Claude suggests for a PDF's notes and explanations (accepted or dismissed in the PDF view).
+const SUGGESTIONS_FILE = '.suggestions.md';
+const KEEP_FILES = [FOLDS_FILE, CLAUDE_FILE, PROPOSALS_FILE, SUGGESTIONS_FILE];
 // Drawings asked about with Alt+K, as PNG for Claude (`.claude-drawing-1.png`, …), rewritten on every question.
 const CLAUDE_DRAWING = /^\.claude-drawing-\d+\.png$/;
 
@@ -109,6 +111,10 @@ export async function claudeDrawingLines(note: vscode.Uri, drawings: { src: stri
 
 export function proposalsUri(note: vscode.Uri): vscode.Uri {
   return vscode.Uri.joinPath(assetsDir(note), PROPOSALS_FILE);
+}
+
+export function suggestionsUri(note: vscode.Uri): vscode.Uri {
+  return vscode.Uri.joinPath(assetsDir(note), SUGGESTIONS_FILE);
 }
 
 // Collapsed headings: a list for a note, a list per card (keyed by section) for PDF notes.

@@ -278,18 +278,16 @@ export function setDividers(text: string, dividers: Divider[]): string {
 }
 
 // Annotations Claude proposes when asked about a bullet (`paper.pdf.assets/.proposals.md`). The
-// extension writes the heading and the bullet asked about, Claude the annotation below it, or, after
-// a `REPLACE` line, a new version of the bullet:
+// extension writes the heading and the bullet asked about, Claude the annotation below it:
 //
 //   ## q1760712345 · page 12 · explanation   ← or `note <key>` for a note
 //
 //   > Structured representations: …          ← the bullet (empty: the whole explanation/note)
 //
 //   The annotation, written by Claude.
-export type Proposal = { id: string; page: number; key: string; explanation: boolean; quote: string; body: string; replace: boolean };
+export type Proposal = { id: string; page: number; key: string; explanation: boolean; quote: string; body: string };
 
 const PROPOSAL_HEADING = /^## (q\d+) · page (\d+) · (?:(explanation)|note (\S+))[ \t]*$/;
-const REPLACE = /^REPLACE[ \t]*(?:\r?\n|$)/;
 
 export function parseProposals(text: string): Proposal[] {
   const proposals: (Proposal & { lines: string[] })[] = [];
@@ -297,7 +295,7 @@ export function parseProposals(text: string): Proposal[] {
     const heading = PROPOSAL_HEADING.exec(line);
     if (heading) {
       const page = Number(heading[2]);
-      proposals.push({ id: heading[1], page, key: heading[4] ?? pageKey(page), explanation: !!heading[3], quote: '', body: '', replace: false, lines: [] });
+      proposals.push({ id: heading[1], page, key: heading[4] ?? pageKey(page), explanation: !!heading[3], quote: '', body: '', lines: [] });
     } else {
       proposals[proposals.length - 1]?.lines.push(line);
     }
@@ -305,20 +303,17 @@ export function parseProposals(text: string): Proposal[] {
   return proposals.map(({ lines, ...p }) => {
     const quote = lines.findIndex((l) => l.trim());
     const hasQuote = quote !== -1 && lines[quote].startsWith('>');
-    const body = lines.slice(hasQuote ? quote + 1 : 0).join('\n').trim();
-    const replace = REPLACE.test(body);
     return {
       ...p,
       quote: hasQuote ? lines[quote].replace(/^>\s?/, '').trim() : '',
-      body: replace ? body.replace(REPLACE, '').trim() : body,
-      replace,
+      body: lines.slice(hasQuote ? quote + 1 : 0).join('\n').trim(),
     };
   });
 }
 
-export function formatProposal({ id, page, key, explanation, quote, body, replace }: Proposal): string {
+export function formatProposal({ id, page, key, explanation, quote, body }: Proposal): string {
   const heading = `## ${id} · page ${page} · ${explanation ? 'explanation' : `note ${key}`}`;
-  return [heading, quote && `> ${quote.replace(/\s+/g, ' ')}`, body && (replace ? `REPLACE\n${body}` : body)].filter(Boolean).join('\n\n');
+  return [heading, quote && `> ${quote.replace(/\s+/g, ' ')}`, body].filter(Boolean).join('\n\n');
 }
 
 export function formatProposals(proposals: Proposal[]): string {
@@ -360,9 +355,8 @@ function annotationLines(annotation: string, mark: boolean): string[] {
 }
 
 // Adds an accepted annotation to a body (explanation or note): as a sub-bullet below the bullet the
-// question was about, else as a bullet after the paragraph quoted or at the end. `replace`: replaces
-// that bullet (with its sub-bullets) or paragraph instead.
-export function insertAnnotation(body: string, quote: string, annotation: string, { mark, replace }: { mark: boolean; replace: boolean }): string {
+// question was about, else as a bullet after the paragraph quoted or at the end.
+export function insertAnnotation(body: string, quote: string, annotation: string, mark: boolean): string {
   const added = annotationLines(annotation, mark);
   const lines = body.split('\n');
   const wanted = plainLine(quote);
@@ -384,11 +378,6 @@ export function insertAnnotation(body: string, quote: string, annotation: string
     while (end + 1 < lines.length && lines[end + 1].trim()) {
       end++;
     }
-    if (replace) {
-      const text = annotation.trim().split('\n');
-      text[0] = (mark ? `${AI_MARK} ` : '') + text[0];
-      return [...lines.slice(0, index), ...text, ...lines.slice(end + 1)].join('\n');
-    }
     let next = end + 1;
     while (next < lines.length && !lines[next].trim()) {
       next++;
@@ -404,9 +393,6 @@ export function insertAnnotation(body: string, quote: string, annotation: string
   let end = index;
   while (end + 1 < lines.length && lines[end + 1].trim() && lines[end + 1].search(/\S/) > indent) {
     end++;
-  }
-  if (replace) {
-    return [...lines.slice(0, index), ...added.map((l) => bullet[1] + l), ...lines.slice(end + 1)].join('\n');
   }
   // Below them, one level in.
   const child = ' '.repeat(bullet[0].length);

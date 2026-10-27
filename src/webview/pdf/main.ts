@@ -10,6 +10,8 @@ import { type Fold, foldPlugin, getFolds, setFolds, toggleFold } from '../fold';
 import { HIGHLIGHT_COLORS, colorFromStyle } from '../highlight';
 import { applyFontSize, applyInit, handleHostMessage, host, noteFontSize, post, saveFile } from '../host';
 import { installSearch, refreshSearch, scrollToRect } from '../search';
+import { setSuggestions, suggestionPlugin } from '../suggestions';
+import type { PdfSuggestion } from '../../suggestions';
 import {
   HIGHLIGHT_KEYS,
   type NoteEditor,
@@ -172,6 +174,8 @@ let expandExplanations = false;
 const toggled = new Set<number>();
 // Annotations Claude proposed on questions about a bullet, until accepted or rejected.
 let proposals: Proposal[] = [];
+// Corrections Claude suggested for notes and explanations, until accepted or dismissed.
+let suggestions: PdfSuggestion[] = [];
 // Pages near the viewport (rendered); others drop their canvas.
 const nearPages = new Set<PageView>();
 // Rows far from the viewport whose cards are laid out once they come near (zooming stays cheap).
@@ -558,11 +562,12 @@ function ensureEditor(card: Card): Promise<NoteEditor> {
         const text = snapshot && markdown.trim() ? `${snapshot}\n\n${markdown}` : snapshot || markdown;
         post({ type: 'editNote', key: card.key, text });
       },
-      (crepe) => crepe.editor.use(foldPlugin((f) => saveCardFolds(card.key, f))),
+      (crepe) => crepe.editor.use(foldPlugin((f) => saveCardFolds(card.key, f))).use(suggestionPlugin),
       card.section.anchor ? undefined : 'Note on this page…',
     );
     card.editor = editor;
     setFolds(editor.view(), folds[card.key] ?? []);
+    applySuggestions(card);
     return editor;
   })();
   return card.creating;
@@ -854,9 +859,10 @@ function ensureClaudeEditor(claude: Claude): void {
         claude.source = markdown;
         post({ type: 'editExplanation', page: claude.page, text: markdown, undoable: false });
       },
-      (crepe) => crepe.editor.use(ownItalic),
+      (crepe) => crepe.editor.use(ownItalic).use(suggestionPlugin),
     );
     claude.editor = editor;
+    applySuggestions(cards.get(pageKey(claude.page))!);
     return editor;
   })();
 }
@@ -926,7 +932,8 @@ function updateClaude(card: Card): void {
   const page = card.section.page;
   const markdown = explanationText(page);
   const { first } = splitExplanation(markdown);
-  const open = !!markdown && expandExplanations !== toggled.has(page);
+  // Open while Claude suggests changes to it, so they can be seen.
+  const open = !!markdown && (expandExplanations !== toggled.has(page) || suggestions.some((s) => s.explanation && s.page === page));
   card.el.classList.toggle('has-claude', !!markdown);
   claude.el.classList.toggle('more', !!markdown);
   claude.el.classList.toggle('open', open);
@@ -963,6 +970,18 @@ function applyExplanations(sections: Section[], own: Record<number, string> = ow
   layoutAll();
 }
 
+// ---------- Corrections suggested by Claude ----------
+
+// Shown as cards (diff, Apply/Dismiss) in the editor of the note or explanation they change.
+function applySuggestions(card: Card): void {
+  if (card.editor) {
+    setSuggestions(card.editor.view(), suggestions.filter((s) => !s.explanation && s.key === card.key));
+  }
+  if (card.claude?.editor) {
+    setSuggestions(card.claude.editor.view(), suggestions.filter((s) => s.explanation && s.page === card.section.page));
+  }
+}
+
 // ---------- Annotations proposed by Claude ----------
 
 // A proposal sits below what the question was about (the explanation or the note) with buttons to
@@ -979,10 +998,10 @@ function applyProposals(): void {
     }
     const box = el('div', 'proposal', parent);
     const head = el('div', 'proposal-head', box);
-    el('span', 'proposal-label', head).textContent = p.replace ? 'Change suggested by Claude' : 'Suggested by Claude';
+    el('span', 'proposal-label', head).textContent = 'Suggested by Claude';
     if (p.quote) {
       const quote = el('span', 'proposal-quote', head);
-      quote.textContent = `${p.replace ? 'replaces' : 'on'} „${p.quote}“`;
+      quote.textContent = `on „${p.quote}“`;
       quote.title = p.quote;
     }
     // Bullets as • (indented like their Markdown).
@@ -995,8 +1014,8 @@ function applyProposals(): void {
     }
     const actions = el('div', 'proposal-actions', box);
     const accept = el('button', 'proposal-accept', actions);
-    accept.textContent = p.replace ? 'Replace' : 'Add';
-    accept.title = p.replace ? 'Replace the bullet with this version' : p.quote ? 'Add below the bullet' : 'Add to the end';
+    accept.textContent = 'Add';
+    accept.title = p.quote ? 'Add below the bullet' : 'Add to the end';
     const reject = el('button', 'proposal-reject', actions);
     reject.textContent = 'Dismiss';
     const answer = (type: 'acceptProposal' | 'rejectProposal') => (e: MouseEvent) => {
@@ -1988,6 +2007,7 @@ window.addEventListener('message', async (event) => {
       expandExplanations = msg.expandExplanations;
       folds = msg.folds;
       proposals = msg.proposals;
+      suggestions = msg.suggestions;
       await loadPdf(msg.pdfUrl);
       break;
     case 'notes':
@@ -2006,6 +2026,14 @@ window.addEventListener('message', async (event) => {
     case 'proposals':
       proposals = msg.proposals;
       applyProposals();
+      break;
+    case 'suggestions':
+      suggestions = msg.suggestions;
+      cards.forEach((card) => {
+        updateClaude(card);
+        applySuggestions(card);
+      });
+      layoutAll();
       break;
     case 'showExplanations':
       showExplanations = msg.show;

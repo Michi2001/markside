@@ -50,6 +50,22 @@ export function parseSuggestions(text: string): Suggestion[] {
     .filter((s) => s.quote);
 }
 
+// PDF view (`paper.pdf.assets/.suggestions.md`): the heading names the text changed instead of a line,
+// `## s3 · page 12 · explanation · title` (Claude's explanation of page 12) or
+// `## s3 · page 12 · note <key> · title` (the note with that section key, `page:12` = page note).
+export type PdfSuggestion = Suggestion & { page: number; key: string; explanation: boolean };
+
+const TARGET = /^page[ \t]+(\d+)[ \t]*·[ \t]*(?:(explanation)|note[ \t]+(\S+))[ \t]*(?:·[ \t]*)?/i;
+
+export function parsePdfSuggestions(text: string): PdfSuggestion[] {
+  return parseSuggestions(text).flatMap((s) => {
+    const target = TARGET.exec(s.title);
+    return target
+      ? [{ ...s, title: s.title.replace(TARGET, ''), page: Number(target[1]), explanation: !!target[2], key: target[3] ?? `page:${target[1]}` }]
+      : [];
+  });
+}
+
 // The file without the section `id` (Claude's text of the other sections stays as it is).
 export function removeSuggestion(text: string, id: string): string {
   let skip = false;

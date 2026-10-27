@@ -6,33 +6,36 @@ import type { Suggestion } from '../suggestions';
 import { post } from './host';
 
 // Changes Claude suggests (Alt+Shift+K) are shown as cards below the block they change; the note's
-// text only changes when one is accepted (by the extension, in the Markdown source).
-let suggestions: Suggestion[] = [];
-const suggestionKey = new PluginKey<DecorationSet>('mdlive-suggestions');
+// text only changes when one is accepted (by the extension, in the Markdown source). Each editor
+// keeps its own list (PDF view: one per note card and explanation).
+type State = { list: Suggestion[]; set: DecorationSet };
+const suggestionKey = new PluginKey<State>('mdlive-suggestions');
 
 // Words shown around a change.
 const CONTEXT_WORDS = 8;
 
 export function setSuggestions(view: EditorView, list: Suggestion[]): void {
-  suggestions = list;
-  view.dispatch(view.state.tr.setMeta(suggestionKey, true));
+  view.dispatch(view.state.tr.setMeta(suggestionKey, list));
 }
 
 export const suggestionPlugin = $prose(
   () =>
-    new Plugin<DecorationSet>({
+    new Plugin<State>({
       key: suggestionKey,
       state: {
-        init: (_, state) => build(state.doc),
-        apply: (tr, set, _old, state) => (tr.docChanged || tr.getMeta(suggestionKey) ? build(state.doc) : set),
+        init: () => ({ list: [], set: DecorationSet.empty }),
+        apply: (tr, old, _old, state) => {
+          const list: Suggestion[] | undefined = tr.getMeta(suggestionKey);
+          return list || tr.docChanged ? { list: list ?? old.list, set: build(state.doc, list ?? old.list) } : old;
+        },
       },
       props: {
-        decorations: (state) => suggestionKey.getState(state),
+        decorations: (state) => suggestionKey.getState(state)?.set,
       },
     }),
 );
 
-function build(doc: ProseNode): DecorationSet {
+function build(doc: ProseNode, suggestions: Suggestion[]): DecorationSet {
   return DecorationSet.create(
     doc,
     suggestions.map((s) =>
@@ -134,7 +137,7 @@ function card(view: EditorView, s: Suggestion): HTMLElement {
   const answer = (type: 'acceptSuggestion' | 'rejectSuggestion') => (e: MouseEvent) => {
     e.preventDefault();
     post({ type, id: s.id });
-    setSuggestions(view, suggestions.filter((q) => q !== s));
+    setSuggestions(view, (suggestionKey.getState(view.state)?.list ?? []).filter((q) => q.id !== s.id));
   };
   accept.addEventListener('mousedown', answer('acceptSuggestion'));
   reject.addEventListener('mousedown', answer('rejectSuggestion'));
