@@ -169,11 +169,23 @@ body.alt .page .textLayer span {
 /* Random colors (Alt+A) set --mark-custom/--line-custom inline. */
 .mark[data-color^='h'] { background: var(--mark-custom); }
 
+/* Marks with a note are underlined in their card's color; plain highlights are not. */
+.mark.annotated:not(.area) { box-shadow: inset 0 -2px var(--line-yellow); }
+.mark.annotated:not(.area)[data-color='red'] { box-shadow: inset 0 -2px var(--line-red); }
+.mark.annotated:not(.area)[data-color='green'] { box-shadow: inset 0 -2px var(--line-green); }
+.mark.annotated:not(.area)[data-color='blue'] { box-shadow: inset 0 -2px var(--line-blue); }
+.mark.annotated:not(.area)[data-color^='h'] { box-shadow: inset 0 -2px var(--line-custom); }
+
+/* Areas: dashed without a note, solid with one. */
 .mark.area {
   background: none;
   mix-blend-mode: normal;
-  outline: 2px solid var(--line-yellow);
+  outline: 2px dashed var(--line-yellow);
   outline-offset: 1px;
+}
+
+.mark.area.annotated {
+  outline-style: solid;
 }
 
 .mark.area[data-color='red'] { outline-color: var(--line-red); }

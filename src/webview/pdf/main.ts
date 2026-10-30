@@ -568,6 +568,9 @@ function ensureEditor(card: Card): Promise<NoteEditor> {
         card.source = markdown;
         card.sent = [...card.sent.slice(-49), markdown];
         card.el.classList.toggle('empty', !markdown.trim());
+        document
+          .querySelectorAll(`.mark[data-key="${CSS.escape(card.key)}"]`)
+          .forEach((m) => m.classList.toggle('annotated', !!markdown.trim()));
         const { snapshot } = splitBody(card.section);
         const text = snapshot && markdown.trim() ? `${snapshot}\n\n${markdown}` : snapshot || markdown;
         post({ type: 'editNote', key: card.key, text });
@@ -721,6 +724,7 @@ function renderMarks(): void {
       const mark = el('div', anchor.area ? 'mark area' : 'mark', pageView(anchor.page)!.marks);
       mark.dataset.key = section.key;
       mark.dataset.color = anchor.color;
+      mark.classList.toggle('annotated', (cards.get(section.key)?.source ?? splitBody(section).text).trim() !== '');
       setCustomColor(mark, anchor.color);
       Object.assign(mark.style, { left: `${r.x * 100}%`, top: `${r.y * 100}%`, width: `${r.w * 100}%`, height: `${r.h * 100}%` });
     }
