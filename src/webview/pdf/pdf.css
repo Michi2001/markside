@@ -282,6 +282,62 @@ body.alt .page .textLayer span {
   z-index: 5;
 }
 
+/* Margin cards cut so the column fits next to the page (`layoutRow`, height = CLAMPED_EM); hovered
+   they show whole, over the cards below, while editing they get their full height. */
+.card.clamped:not(.on-page):not(:hover):not(.hover):not(:focus-within) {
+  max-height: calc(var(--mdlive-font-size, 16px) * 7);
+  overflow: hidden;
+  -webkit-mask-image: linear-gradient(to bottom, #000 calc(100% - 2.5em), transparent);
+}
+
+.card.clamped:is(:hover, .hover) {
+  z-index: 3;
+}
+
+/* Column too narrow for its cards (`sizePage`): they keep their minimum width and lie over the page,
+   right-aligned at the window's edge, cut to a colored tab until hovered (card or mark) or edited.
+   Collapsing waits a moment, so the pointer can move from a mark to its card. */
+.row.overlay .card:not(.on-page) {
+  left: auto;
+  width: var(--notes-width);
+  z-index: 3;
+  clip-path: inset(0 0 0 calc(100% - 6px));
+  transition: clip-path 0.15s ease 0.3s, box-shadow 0.15s;
+}
+
+.row.overlay .card:not(.on-page)::after {
+  content: '';
+  position: absolute;
+  top: 0;
+  right: 0;
+  bottom: 0;
+  width: 6px;
+  border-radius: 0 6px 6px 0;
+  background: var(--card-color);
+  transition: opacity 0.15s ease 0.3s;
+}
+
+.row.overlay .card:not(.on-page):is(:hover, .hover) {
+  clip-path: inset(-20px);
+  transition-delay: 0s;
+  z-index: 4;
+}
+
+.row.overlay .card:not(.on-page):is(:hover, .hover, :focus-within)::after {
+  opacity: 0;
+  transition-delay: 0s;
+}
+
+/* Editing: unclipped, Crepe's menus reach past the card. */
+.row.overlay .card:not(.on-page):focus-within {
+  clip-path: none;
+  z-index: 5;
+}
+
+.row.overlay .lines path.to-margin {
+  display: none;
+}
+
 .card-head {
   display: flex;
   align-items: flex-start;

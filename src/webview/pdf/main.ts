@@ -70,6 +70,11 @@ const RIGHT_WEIGHT = 0.6;
 const MAX_PAGE_DISTANCE = 0.12;
 // A card on the page may stick out past its right edge by this share of its width (into the margin).
 const MAX_OVERHANG = 0.5;
+// When the margin cards reach past the page (zoomed in, many notes), the tallest are cut to this
+// height (times the note font size, `.card.clamped` in pdf.css) until they fit; hover shows them whole.
+// Only cards taller than CLAMP_MIN_SHARE times that are cut, shorter ones would hardly gain room.
+const CLAMPED_EM = 7;
+const CLAMP_MIN_SHARE = 1.3;
 // Hues of red and green; random colors (Alt+A, stored as `h<hue>`) keep away from them.
 const AVOID_HUES = [345, 135];
 
@@ -211,8 +216,13 @@ function sizePage(pv: PageView): void {
   pv.pageEl.style.width = `${pv.width * scale}px`;
   pv.pageEl.style.height = `${pv.height * scale}px`;
   pv.pageEl.style.setProperty('--total-scale-factor', String(scale));
-  const free = viewer.clientWidth - VIEWER_PADDING - GAP - pv.width * scale;
-  pv.margin.style.width = `${Math.max(MIN_NOTES_EM * noteFontSize(), free / notesZoom())}px`;
+  const free = (viewer.clientWidth - VIEWER_PADDING - GAP - pv.width * scale) / notesZoom();
+  // Too narrow for the cards: the column shrinks to what is left (it ends at the window's edge) and
+  // its cards lie over the page, as tabs until hovered (`.row.overlay` in pdf.css).
+  const overlay = free < MIN_NOTES_EM * noteFontSize();
+  pv.row.classList.toggle('overlay', overlay);
+  pv.margin.style.setProperty('--notes-width', `${MIN_NOTES_EM * noteFontSize()}px`);
+  pv.margin.style.width = `${overlay ? Math.max(0, free) : free}px`;
   pv.margin.style.zoom = String(notesZoom());
 }
 
@@ -1100,6 +1110,8 @@ function layoutRow(pv: PageView): void {
   rowCards.forEach((card) => {
     const onPage = pinned(card) ? !!card.place && !card.inMargin : trying.includes(card);
     card.el.classList.toggle('on-page', onPage);
+    // Measured at full height; cut again below if the margin still doesn't fit.
+    card.el.classList.remove('clamped');
     card.el.style.width = onPage && card.place ? `${card.place.w}px` : '';
   });
   const heights = new Map(rowCards.map((card) => [card, card.el.offsetHeight]));
@@ -1152,26 +1164,48 @@ function layoutRow(pv: PageView): void {
       const t = (card.place!.y * scale) / z;
       return { top: t - CARD_GAP, bottom: t + heights.get(card)! + CARD_GAP };
     });
-  let y = 0;
-  const placed: { card: Card; top: number }[] = [];
-  for (const card of rowCards) {
-    if (card.place) {
-      card.el.style.left = `${(card.place.x * scale - pv.width * scale - GAP) / z}px`;
-      card.el.style.top = `${(card.place.y * scale) / z}px`;
-    } else {
+  // Tops of the margin cards and the bottom of the last one.
+  const stack = () => {
+    const tops = new Map<Card, number>();
+    let y = 0;
+    for (const card of margin) {
       const desired = card.section.anchor ? top(card.section.anchor) * pageHeight - 10 : 0;
       let cardTop = Math.max(desired, y);
       let blocking;
       while ((blocking = overhangs.find((o) => o.top < cardTop + heights.get(card)! && cardTop < o.bottom))) {
         cardTop = blocking.bottom;
       }
-      card.el.style.left = '';
-      card.el.style.top = `${cardTop}px`;
+      tops.set(card, cardTop);
       y = cardTop + heights.get(card)! + CARD_GAP;
+    }
+    return { tops, bottom: y };
+  };
+  // Too long for the page: cut the tallest cards (not the one being edited) until the stack fits.
+  const clampHeight = CLAMPED_EM * noteFontSize();
+  let { tops, bottom } = stack();
+  const tall = margin
+    .filter((card) => heights.get(card)! > clampHeight * CLAMP_MIN_SHARE && !card.el.contains(document.activeElement))
+    .sort((a, b) => heights.get(b)! - heights.get(a)!);
+  for (const card of tall) {
+    if (bottom <= pageHeight) {
+      break;
+    }
+    card.el.classList.add('clamped');
+    heights.set(card, clampHeight);
+    ({ tops, bottom } = stack());
+  }
+  const placed: { card: Card; top: number }[] = [];
+  for (const card of rowCards) {
+    if (card.place) {
+      card.el.style.left = `${(card.place.x * scale - pv.width * scale - GAP) / z}px`;
+      card.el.style.top = `${(card.place.y * scale) / z}px`;
+    } else {
+      card.el.style.left = '';
+      card.el.style.top = `${tops.get(card)}px`;
     }
     placed.push({ card, top: parseFloat(card.el.style.top) });
   }
-  pv.margin.style.height = `${Math.max(pageHeight, y)}px`;
+  pv.margin.style.height = `${Math.max(pageHeight, bottom)}px`;
   drawLines(pv, placed, heights);
 }
 
@@ -1321,6 +1355,7 @@ function drawLines(pv: PageView, placed: { card: Card; top: number }[], heights:
     const path = document.createElementNS('http://www.w3.org/2000/svg', 'path');
     path.setAttribute('d', d);
     path.dataset.key = card.key;
+    path.classList.toggle('to-margin', !card.place);
     path.dataset.color = anchor.color;
     setCustomColor(path, anchor.color);
     path.classList.toggle('focus', card.el.contains(document.activeElement));
