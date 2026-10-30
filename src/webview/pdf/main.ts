@@ -1814,7 +1814,8 @@ viewer.addEventListener('mouseleave', () => {
   hoveredClaude = undefined;
 });
 
-// The connector of the focused card is emphasized.
+// The focused card is `.selected` and its connector emphasized. Both stay while the window has lost
+// the focus (the active element is kept), until the focus moves elsewhere in the view.
 for (const type of ['focusin', 'focusout']) {
   document.addEventListener(type, () =>
     setTimeout(() => {
@@ -1936,6 +1937,9 @@ installSearch<Match>({
         if (m[0]) {
           matches.push({ pv, info: infos[n], from: m.index, to: m.index + m[0].length });
         }
+      }
+      for (const card of cards.values()) {
+        card.el.classList.toggle('selected', card.el.contains(document.activeElement));
       }
     });
     return matches;

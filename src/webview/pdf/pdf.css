@@ -264,7 +264,7 @@ body.alt .page .textLayer span {
 }
 
 /* Unwritten page notes stay unobtrusive until hovered or focused. */
-.card.page-note.empty:not(.has-claude):not(:focus-within):not(:hover) {
+.card.page-note.empty:not(.has-claude):not(.selected):not(:hover) {
   opacity: 0.55;
   border-left-color: transparent;
 }
@@ -274,11 +274,11 @@ body.alt .page .textLayer span {
 }
 
 .card.hover,
-.card:focus-within {
+.card.selected {
   box-shadow: 0 2px 10px rgba(0, 0, 0, 0.18);
 }
 
-.card:focus-within {
+.card.selected {
   z-index: 2;
 }
 
@@ -290,13 +290,13 @@ body.alt .page .textLayer span {
   box-shadow: 0 1px 6px rgba(0, 0, 0, 0.2);
 }
 
-.card.on-page:focus-within {
+.card.on-page.selected {
   z-index: 5;
 }
 
 /* Margin cards cut so the column fits next to the page (`layoutRow`, height = CLAMPED_EM); hovered
    they show whole, over the cards below, while editing they get their full height. */
-.card.clamped:not(.on-page):not(:hover):not(.hover):not(:focus-within) {
+.card.clamped:not(.on-page):not(:hover):not(.hover):not(.selected) {
   max-height: calc(var(--mdlive-font-size, 16px) * 7);
   overflow: hidden;
   -webkit-mask-image: linear-gradient(to bottom, #000 calc(100% - 2.5em), transparent);
@@ -335,13 +335,13 @@ body.alt .page .textLayer span {
   z-index: 4;
 }
 
-.row.overlay .card:not(.on-page):is(:hover, .hover, :focus-within)::after {
+.row.overlay .card:not(.on-page):is(:hover, .hover, .selected)::after {
   opacity: 0;
   transition-delay: 0s;
 }
 
 /* Editing: unclipped, Crepe's menus reach past the card. */
-.row.overlay .card:not(.on-page):focus-within {
+.row.overlay .card:not(.on-page).selected {
   clip-path: none;
   z-index: 5;
 }
@@ -451,7 +451,7 @@ body.alt .page .textLayer span {
 }
 
 .card:hover .card-delete,
-.card:focus-within .card-delete {
+.card.selected .card-delete {
   opacity: 0.7;
 }
 
