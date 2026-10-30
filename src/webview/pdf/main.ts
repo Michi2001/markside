@@ -1304,7 +1304,8 @@ function placeOnPage(
       if (dy + cost >= best) {
         continue;
       }
-      for (let c = 0; c + cw <= cols + Math.floor(cw * MAX_OVERHANG); c++) {
+      // Never past the column's right edge: with the column overlaid (`.row.overlay`) that is the window's edge.
+      for (let c = 0; c + cw <= cols + Math.floor(cw * MAX_OVERHANG) && c * CELL + wPt <= edge; c++) {
         const x = c * CELL;
         const dx = x >= mark.x1 ? (x - mark.x1) * RIGHT_WEIGHT : Math.max(0, mark.x0 - (x + wPt));
         const d = Math.hypot(dx, dy) + cost;
