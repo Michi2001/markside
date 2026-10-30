@@ -59,10 +59,13 @@ const COLORS = ['yellow', 'red', 'green', 'blue'];
 // background, grown by INK_PAD cells so cards keep a distance from the content.
 const CELL = 4;
 const INK_PAD = 2;
-// Widths a card placed on the page may take (column units, like the margin), widest first; narrower
-// ones cost NARROW_COST points of distance per unit, so they are only used to stay closer to the mark.
+// Widths a card placed on the page is tried with at most (column units, like the margin), widest first;
+// cards are only as wide as their content. Narrower ones cost NARROW_COST points of distance per unit,
+// so they are only used to stay closer to the mark.
 const PAGE_CARD_WIDTHS = [240, 200, 160];
 const NARROW_COST = 0.1;
+// Limit used to measure a card's content without wrapping.
+const UNLIMITED_WIDTH = 10000;
 // Spots right of the mark count their horizontal distance only this much (reading goes on to the right).
 const RIGHT_WEIGHT = 0.6;
 // A card goes onto the page only within this distance of its mark (fraction of the page's longer
@@ -1219,21 +1222,27 @@ function layoutRow(pv: PageView): void {
       card.place = null;
     }
   }
-  // Heights in the margin (pinned cards on the page: at their spot) and at each width a card is
-  // tried with on the page; reads and writes in batches, not per card.
+  // Heights in the margin (pinned cards on the page: at their spot) and the real sizes at each width
+  // a card is tried with on the page, plus its content's full width; reads and writes in batches, not
+  // per card.
+  const setMaxWidth = (card: Card, w: number | undefined) =>
+    w === undefined ? card.el.style.removeProperty('--card-max') : card.el.style.setProperty('--card-max', `${w}px`);
   rowCards.forEach((card) => {
     const onPage = pinned(card) && !!card.place;
     card.el.classList.toggle('on-page', onPage);
     // Measured at full height; cut again below if the margin still doesn't fit.
     card.el.classList.remove('clamped');
-    card.el.style.width = onPage ? `${card.place!.w}px` : '';
+    setMaxWidth(card, onPage ? card.place!.w : undefined);
   });
   const heights = new Map(rowCards.map((card) => [card, card.el.offsetHeight]));
   trying.forEach((card) => card.el.classList.add('on-page'));
-  const heightsAt = PAGE_CARD_WIDTHS.map((w) => {
-    trying.forEach((card) => (card.el.style.width = `${w}px`));
-    return new Map(trying.map((card) => [card, card.el.offsetHeight]));
-  });
+  const sizesAt = (w: number) => {
+    trying.forEach((card) => setMaxWidth(card, w));
+    // offsetWidth rounds: exactly that as a limit could wrap the last word.
+    return new Map(trying.map((card) => [card, { w: card.el.offsetWidth + 1, h: card.el.offsetHeight }]));
+  };
+  const tried = PAGE_CARD_WIDTHS.map(sizesAt);
+  const natural = sizesAt(UNLIMITED_WIDTH);
   const toPoints = (px: number) => (px * z) / scale;
   const desired = (card: Card) => (card.section.anchor ? top(card.section.anchor) * pageHeight - 10 : 0);
   // Right edge of the notes column, in points: cards sticking out into the column extend up to it.
@@ -1265,12 +1274,13 @@ function layoutRow(pv: PageView): void {
       };
       rowCards.filter((card) => places.get(card)).forEach(reserve);
       for (const card of order) {
-        const sizes = PAGE_CARD_WIDTHS.map((w, i) => ({ w, wPt: toPoints(w), hPt: toPoints(heightsAt[i].get(card)!) }));
-        const spot = placeOnPage(pv, grid, card.section.anchor!, sizes, boxes, inside.has(card) ? pv.width : edge);
+        const real = tried.map((sizes) => sizes.get(card)!).filter((s, i, all) => i === 0 || s.w !== all[i - 1].w);
+        const sizes = real.map(({ w, h: height }) => ({ w, wPt: toPoints(w), hPt: toPoints(height) }));
+        const spot = placeOnPage(pv, grid, card.section.anchor!, sizes, toPoints(natural.get(card)!.w), boxes, inside.has(card) ? pv.width : edge);
         if (spot) {
           places.set(card, { x: spot.x, y: spot.y, w: (spot.wPt * scale) / z });
           // Height at the tried width; a widened card is lower, so its reserved cells are on the safe side.
-          h.set(card, heightsAt[PAGE_CARD_WIDTHS.indexOf(spot.w)].get(card)!);
+          h.set(card, real.find((s) => s.w === spot.w)!.h);
           cost += spot.d;
           reserve(card);
         }
@@ -1310,7 +1320,7 @@ function layoutRow(pv: PageView): void {
 
   rowCards.forEach((card) => {
     card.el.classList.toggle('on-page', !!card.place);
-    card.el.style.width = card.place ? `${card.place.w}px` : '';
+    setMaxWidth(card, card.place?.w);
   });
   rowCards.forEach((card) => heights.set(card, card.el.offsetHeight));
   const margin = rowCards.filter((card) => !card.place);
@@ -1441,12 +1451,14 @@ function alongLine([x0, y0, x1, y1]: [number, number, number, number], visit: (c
 // Free spot (PDF points) closest to the mark for a card in one of its `sizes` (`w` in column units,
 // `wPt`/`hPt` in points) whose connector crosses neither content nor other cards (`boxes`), with its
 // distance `d`, or null when there is none closer than the margin. A card sticking out into the notes column is widened up
-// to the column's right `edge` (returned `wPt`), so it doesn't stay a narrow strip next to free space.
+// to its content's width `naturalPt`, at most to the column's right `edge` (returned `wPt`), so it doesn't stay a narrow strip
+// next to free space.
 function placeOnPage(
   pv: PageView,
   grid: Grid,
   anchor: Anchor,
   sizes: { w: number; wPt: number; hPt: number }[],
+  naturalPt: number,
   boxes: Box[],
   edge: number,
 ): { x: number; y: number; w: number; wPt: number; d: number } | null {
@@ -1473,7 +1485,7 @@ function placeOnPage(
   let best = Math.min(pv.width - mark.x1 + GAP / scale, MAX_PAGE_DISTANCE * Math.max(pv.width, pv.height));
   let place: { x: number; y: number; w: number; wPt: number; d: number } | null = null;
   for (const { w, wPt, hPt } of sizes) {
-    const cost = (PAGE_CARD_WIDTHS[0] - w) * NARROW_COST;
+    const cost = (sizes[0].w - w) * NARROW_COST;
     const cw = Math.ceil(wPt / CELL);
     const ch = Math.ceil(hPt / CELL);
     for (let r = 0; r + ch <= rows; r++) {
@@ -1490,7 +1502,7 @@ function placeOnPage(
         const c1 = Math.min(c + cw, cols);
         const used = () =>
           sum[(r + ch) * (cols + 1) + c1] - sum[r * (cols + 1) + c1] - sum[(r + ch) * (cols + 1) + c] + sum[r * (cols + 1) + c];
-        const x1 = x + wPt > pv.width + GAP / scale ? Math.max(x + wPt, edge) : x + wPt;
+        const x1 = x + wPt > pv.width + GAP / scale ? Math.max(x + wPt, Math.min(x + naturalPt, edge)) : x + wPt;
         const box = { x0: x, y0: y, x1, y1: y + hPt };
         if (d < best && used() === 0 && clearOutside(box) && clearLine(box)) {
           best = d;
@@ -1521,7 +1533,7 @@ function drawLines(pv: PageView, placed: { card: Card; top: number }[], heights:
     if (card.place) {
       const x0 = card.place.x * scale;
       const y0 = card.place.y * scale;
-      const box = { x0, y0, x1: x0 + card.place.w * z, y1: y0 + heights.get(card)! * z };
+      const box = { x0, y0, x1: x0 + card.el.offsetWidth * z, y1: y0 + heights.get(card)! * z };
       const [sx, sy, ex, ey] = connector(markBox(anchor, pageWidth, pageHeight), box);
       d = `M${sx},${sy} L${ex},${ey}`;
     } else {

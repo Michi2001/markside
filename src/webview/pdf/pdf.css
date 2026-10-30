@@ -286,7 +286,10 @@ body.alt .page .textLayer span {
   --card-color: var(--line-yellow);
   position: absolute;
   left: 0;
-  right: 0;
+  /* Only as wide as the content, up to the column. */
+  width: max-content;
+  min-width: calc(var(--mdlive-font-size, 16px) * 6);
+  max-width: 100%;
   box-sizing: border-box;
   border: 1px solid var(--vscode-editorWidget-border, rgba(128, 128, 128, 0.35));
   border-left: 3px solid var(--card-color);
@@ -299,6 +302,11 @@ body.alt .page .textLayer span {
 .card[data-color='green'] { --card-color: var(--line-green); }
 .card[data-color='blue'] { --card-color: var(--line-blue); }
 .card[data-color^='h'] { --card-color: var(--line-custom); }
+
+/* Room for the placeholder and for typing the first words. */
+.card.empty {
+  min-width: calc(var(--mdlive-font-size, 16px) * 12);
+}
 
 .card.page-note {
   --card-color: var(--vscode-descriptionForeground);
@@ -323,15 +331,16 @@ body.alt .page .textLayer span {
   z-index: 2;
 }
 
-/* Cards placed on the page's free space (`layoutRow`), above its text layer. */
+/* Cards placed on the page's free space (`layoutRow`, --card-max: width of the spot), above its text
+   layer. While editing they may grow past a short text's width. */
 .card.on-page {
-  right: auto;
-  width: 240px;
+  max-width: var(--card-max, 240px);
   z-index: 4;
   box-shadow: 0 1px 6px rgba(0, 0, 0, 0.2);
 }
 
 .card.on-page.selected {
+  max-width: max(var(--card-max, 240px), 240px);
   z-index: 5;
 }
 
@@ -352,7 +361,8 @@ body.alt .page .textLayer span {
    Collapsing waits a moment, so the pointer can move from a mark to its card. */
 .row.overlay .card:not(.on-page) {
   left: auto;
-  width: var(--notes-width);
+  right: 0;
+  max-width: var(--notes-width);
   z-index: 3;
   clip-path: inset(0 0 0 calc(100% - 6px));
   transition: clip-path 0.15s ease 0.3s, box-shadow 0.15s;
@@ -413,8 +423,8 @@ body.alt .page .textLayer span {
   line-height: 1.4;
 }
 
-/* Area notes show no title (the color links them to their area); only × remains, in the top right
-   corner, so the head takes no space. */
+/* Area notes show no title (the color links them to their area); only × remains, on the top right
+   corner, so the head takes no space and covers no text of a card as wide as its text. */
 .card.area {
   padding-top: 6px;
 }
@@ -425,8 +435,8 @@ body.alt .page .textLayer span {
 
 .card.area .card-head {
   position: absolute;
-  top: 4px;
-  right: 4px;
+  top: -7px;
+  right: -7px;
   z-index: 1;
   padding: 0;
 }
@@ -441,7 +451,9 @@ body.alt .page .textLayer span {
   font-size: calc(var(--mdlive-font-size, 16px) * 0.6875);
 }
 
+/* The quote is cut to the note's width, it doesn't widen the card. */
 .card:not(.page-note):not(.area) .card-label {
+  contain: inline-size;
   -webkit-line-clamp: 1;
   line-height: 1.6;
 }
@@ -458,8 +470,8 @@ body.alt .page .textLayer span {
 
 .card.on-page .card-head {
   position: absolute;
-  top: 4px;
-  right: 4px;
+  top: -7px;
+  right: -7px;
   z-index: 1;
   padding: 0;
 }
