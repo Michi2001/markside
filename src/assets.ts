@@ -75,6 +75,12 @@ async function readText(uri: vscode.Uri): Promise<string> {
 }
 
 // Saves image bytes into the note's assets folder and returns the Markdown-relative path.
+// Opens a file linked relatively from a note (link inside raw HTML).
+export function openLinkedFile(note: vscode.Uri, link: string): void {
+  const file = vscode.Uri.joinPath(note, '..', decodeURI(link.split(/[?#]/)[0]));
+  vscode.commands.executeCommand('vscode.open', file);
+}
+
 export async function saveImage(note: vscode.Uri, name: string, mime: string, data: string): Promise<string> {
   const dir = assetsDir(note);
   await fs.createDirectory(dir);

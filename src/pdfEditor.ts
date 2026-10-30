@@ -1,7 +1,7 @@
 import * as path from 'path';
 import * as vscode from 'vscode';
 import { navigationKeys } from './keybindings';
-import { claudeDrawingLines, cleanupAssets, explanationsUri, loadFolds, notesUri, proposalsUri, saveFolds, saveImage, suggestionsUri, writeClaudeContext } from './assets';
+import { claudeDrawingLines, cleanupAssets, explanationsUri, loadFolds, notesUri, openLinkedFile, proposalsUri, saveFolds, saveImage, suggestionsUri, writeClaudeContext } from './assets';
 import { DrawingServer, getDrawingDevice } from './drawingServer';
 import { type PdfView, explainSlides, getClaudeLanguage, isExplaining } from './explain';
 import type { FontSizes } from './fontSizes';
@@ -46,6 +46,7 @@ type WebviewMessage =
   | { type: 'askClaude'; page: number; quote?: string; rects?: Rect[]; color?: string; key?: string; note?: boolean; explanation?: boolean; drawings?: ClaudeDrawing[]; propose?: boolean }
   | { type: 'view'; page: number; pages: number }
   | { type: 'openLink'; url: string }
+  | { type: 'openFile'; path: string }
   | { type: 'pageTexts'; texts: string[] }
   | { type: 'deleteExplanation'; page: number }
   | { type: 'editExplanation'; page: number; text: string; undoable: boolean }
@@ -624,6 +625,9 @@ export class PdfEditorProvider implements vscode.CustomReadonlyEditorProvider {
           break;
         case 'folds':
           queue(() => saveFolds(notes, msg.folds));
+          break;
+        case 'openFile':
+          openLinkedFile(notes, msg.path);
           break;
         case 'readClipboard':
           panel.webview.postMessage({ type: 'clipboardText', id: msg.id, text: await vscode.env.clipboard.readText() });

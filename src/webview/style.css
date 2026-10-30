@@ -306,6 +306,61 @@ body[data-theme='dark'] {
   padding: 1px 0;
 }
 
+/* Block-level raw HTML, rendered (htmlBlock.ts) */
+.milkdown .ProseMirror .mdlive-html {
+  margin: 0.5em 0;
+  /* ProseMirror's pre-wrap would keep the source's line breaks. */
+  white-space: normal;
+}
+
+.milkdown .ProseMirror .mdlive-html :is(h1, h2, h3, h4, h5, h6, p) {
+  margin: 0.25em 0;
+  padding: 0;
+}
+
+.milkdown .ProseMirror .mdlive-html :is(h1, h2, h3, h4, h5, h6) p {
+  font: inherit;
+  color: inherit;
+}
+
+.milkdown .ProseMirror .mdlive-html img {
+  display: inline-block;
+  max-width: 100%;
+  height: auto;
+}
+
+.milkdown .ProseMirror .mdlive-html summary {
+  cursor: pointer;
+}
+
+.milkdown .ProseMirror .mdlive-details-open > details > summary::marker {
+  content: '▾ ';
+}
+
+.milkdown .ProseMirror .mdlive-html.ProseMirror-selectednode {
+  outline: 1px solid var(--vscode-focusBorder);
+}
+
+.milkdown .ProseMirror .mdlive-html-raw {
+  white-space: pre-wrap;
+  font-family: var(--vscode-editor-font-family, monospace);
+  font-size: 0.85em;
+  opacity: 0.6;
+}
+
+.milkdown .ProseMirror .mdlive-html-source {
+  display: block;
+  box-sizing: border-box;
+  width: 100%;
+  padding: 0.5em;
+  resize: vertical;
+  font-family: var(--vscode-editor-font-family, monospace);
+  font-size: 0.85em;
+  color: var(--vscode-input-foreground);
+  background: var(--vscode-input-background);
+  border: 1px solid var(--vscode-focusBorder);
+}
+
 /* Alt+Y: collapsed heading sections */
 .milkdown .ProseMirror .mdlive-folded {
   display: none;

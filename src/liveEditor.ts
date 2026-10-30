@@ -1,6 +1,6 @@
 import * as vscode from 'vscode';
 import { navigationKeys } from './keybindings';
-import { adoptAssets, claudeDrawingLines, cleanupAssets, loadFolds, proposalsUri, saveFolds, saveImage, writeClaudeContext } from './assets';
+import { adoptAssets, claudeDrawingLines, cleanupAssets, loadFolds, openLinkedFile, proposalsUri, saveFolds, saveImage, writeClaudeContext } from './assets';
 import { preserveSource } from './preserve';
 import { type Suggestion, findQuote, lineAt, parseSuggestions, removeSuggestion, suggestionSource } from './suggestions';
 import { DrawingServer, type DrawingFile, type DrawingTarget, getDrawingDevice } from './drawingServer';
@@ -29,6 +29,7 @@ type WebviewMessage =
   | { type: 'edit'; text: string }
   | { type: 'saveImage'; id: number; name: string; mime: string; data: string }
   | { type: 'readClipboard'; id: number }
+  | { type: 'openFile'; path: string }
   | { type: 'selection'; text: string; drawings?: ClaudeDrawing[]; propose?: boolean; suggestion?: string }
   | { type: 'acceptSuggestion'; id: string }
   | { type: 'rejectSuggestion'; id: string }
@@ -193,6 +194,9 @@ export class LiveEditorProvider implements vscode.CustomTextEditorProvider {
           if (!(await renameNote(document, msg.title))) {
             panel.webview.postMessage({ type: 'title', title: noteTitle(document.uri) });
           }
+          break;
+        case 'openFile':
+          openLinkedFile(document.uri, msg.path);
           break;
         case 'readClipboard':
           panel.webview.postMessage({ type: 'clipboardText', id: msg.id, text: await vscode.env.clipboard.readText() });

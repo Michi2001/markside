@@ -12,6 +12,7 @@ import { setHeading, shiftHeading } from './headings';
 import { dim } from './dim';
 import { highlight } from './highlight';
 import { drawRemotely, host, post, readClipboard, resolveUrl, saveFile, uploadImage } from './host';
+import { htmlBlock, remarkHtmlBlocks } from './htmlBlock';
 import { createImageBlockView, extendImageBlockSchema, remarkHtmlImages } from './imageView';
 import { indentListItems, moveBlocksKeymap } from './moveBlocks';
 import './style.css';
@@ -172,7 +173,7 @@ export async function createNoteEditor(
   };
   crepe.editor.config((ctx) => {
     ctx.update(remarkStringifyOptionsCtx, (prev) => ({ ...prev, bullet: '-' as const }));
-    ctx.update(remarkPluginsCtx, (prev) => [...prev, remarkHtmlImages]);
+    ctx.update(remarkPluginsCtx, (prev) => [...prev, remarkHtmlImages, remarkHtmlBlocks]);
     ctx.update(imageBlockSchema.key, extendImageBlockSchema);
     // Milkdown creates new list items as loose (`spread: true`), so an item that gets a sublist was
     // saved with a blank line before it. Parsed items keep the spread of their Markdown.
@@ -190,7 +191,7 @@ export async function createNoteEditor(
       onChange(markdown);
     });
   });
-  crepe.editor.use(moveBlocksKeymap).use(highlight).use(dim).use(aiAnnotations);
+  crepe.editor.use(moveBlocksKeymap).use(highlight).use(dim).use(htmlBlock).use(aiAnnotations);
   configure?.(crepe);
   await crepe.create();
   const view = editor.view();
