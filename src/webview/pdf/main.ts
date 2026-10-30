@@ -2129,6 +2129,15 @@ window.addEventListener('message', async (event) => {
     case 'revealDivider':
       revealDivider(msg.after);
       break;
+    // mdLive.fitPdfWidth (Alt+1): the widest page fills the window's width (the notes lie over it as
+    // tabs, `.row.overlay`); again: back to the default fit with the notes next to the pages.
+    case 'fitWidth': {
+      const base = baseScale();
+      const fit = (viewer.clientWidth - VIEWER_PADDING - GAP) / Math.max(...pages.map((p) => p.width)) / base;
+      zoom = clampZoom(Math.abs(zoom - fit) < 0.01 ? 1 : fit, base);
+      scheduleScale();
+      break;
+    }
     case 'requestPageTexts':
       post({ type: 'pageTexts', texts: await allPageTexts() });
       break;

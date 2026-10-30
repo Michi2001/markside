@@ -157,6 +157,11 @@
         "icon": "$(milestone)"
       },
       {
+        "command": "mdLive.fitPdfWidth",
+        "title": "Fit PDF to Window Width",
+        "category": "Markside"
+      },
+      {
         "command": "mdLive.explainSlides",
         "title": "Explain Slides with Claude…",
         "category": "Markside",
@@ -318,6 +323,10 @@
           "when": "activeCustomEditorId == mdLive.pdf"
         },
         {
+          "command": "mdLive.fitPdfWidth",
+          "when": "activeCustomEditorId == mdLive.pdf"
+        },
+        {
           "command": "mdLive.explainSlides",
           "when": "activeCustomEditorId == mdLive.pdf"
         },
@@ -410,7 +419,14 @@
           "description": "Port of the local server for drawing on the iPad."
         }
       }
-    }
+    },
+    "keybindings": [
+      {
+        "command": "mdLive.fitPdfWidth",
+        "key": "alt+1",
+        "when": "activeCustomEditorId == mdLive.pdf"
+      }
+    ]
   },
   "scripts": {
     "build": "node esbuild.mjs",

@@ -112,6 +112,14 @@ export class PdfEditorProvider implements vscode.CustomReadonlyEditorProvider {
     }
   }
 
+  fitWidth(): void {
+    if (!this.active) {
+      vscode.window.showWarningMessage('No PDF is active.');
+      return;
+    }
+    this.active.fitWidth();
+  }
+
   explainSlides(): void {
     if (!this.active) {
       vscode.window.showWarningMessage('No PDF is active.');
@@ -251,6 +259,7 @@ export class PdfEditorProvider implements vscode.CustomReadonlyEditorProvider {
         panel.reveal();
         panel.webview.postMessage({ type: 'revealDivider', after });
       },
+      fitWidth: () => panel.webview.postMessage({ type: 'fitWidth' }),
     };
     if (panel.active) {
       this.active = view;

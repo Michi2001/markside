@@ -23,6 +23,8 @@ export type PdfView = {
   // Asks for date/title of the divider after a page (new or existing) and scrolls to one.
   editDivider: (after: number) => Promise<void>;
   reveal: (after: number) => void;
+  // Toggles between the widest page filling the window's width and the default fit.
+  fitWidth: () => void;
 };
 
 const running = new Map<string, ChildProcess>();
