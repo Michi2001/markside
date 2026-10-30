@@ -3,13 +3,13 @@ import { $prose } from '@milkdown/kit/utils';
 import type { EditorView } from '@milkdown/kit/prose/view';
 import katex from 'katex';
 import * as pdfjs from 'pdfjs-dist';
-import type { PDFPageProxy, RenderTask } from 'pdfjs-dist';
+import type { PDFDocumentProxy, PDFPageProxy, RenderTask } from 'pdfjs-dist';
 import { type Anchor, type Divider, type Proposal, type Rect, type Section, formatAnchor, pageExplanation, pageKey } from '../../sidecar';
 import { isDrawingOpen } from '../drawing';
 import { type Fold, foldPlugin, getFolds, setFolds, toggleFold } from '../fold';
 import { HIGHLIGHT_COLORS, colorFromStyle } from '../highlight';
 import { applyFontSize, applyInit, handleHostMessage, host, noteFontSize, post, saveFile } from '../host';
-import { installSearch, refreshSearch, scrollToRect } from '../search';
+import { installSearch, refreshSearch, rememberPosition, scrollToRect } from '../search';
 import { setSuggestions, suggestionPlugin } from '../suggestions';
 import type { PdfSuggestion } from '../../suggestions';
 import {
@@ -77,6 +77,10 @@ const CLAMPED_EM = 7;
 const CLAMP_MIN_SHARE = 1.3;
 // Hues of red and green; random colors (Alt+A, stored as `h<hue>`) keep away from them.
 const AVOID_HUES = [345, 135];
+// A link's target ends up this far below the window's top (px).
+const LINK_TOP_MARGIN = 24;
+// A press and release farther apart than this (px) is a drag, not a click on a link.
+const MAX_CLICK_MOVE = 4;
 
 type Claude = {
   page: number;
@@ -144,9 +148,16 @@ type PageView = {
   ink?: Grid;
   // Spans of the rendered text layer, one per text item (search highlights).
   textDivs?: HTMLElement[];
+  // The PDF's own links (citations, sections, URLs), loaded when the page is first rendered.
+  links?: PageLink[];
 };
 
+// Rectangle as fractions of the page; `dest`: name or explicit destination inside the PDF.
+// `el`: its tint on the page.
+type PageLink = Rect & { url?: string; dest?: string | unknown[]; el: HTMLElement };
+
 const viewer = document.getElementById('viewer') as HTMLElement;
+let pdf: PDFDocumentProxy;
 const pages: PageView[] = [];
 const cards = new Map<string, Card>();
 let scale = 1;
@@ -167,6 +178,8 @@ let hoveredMark: string | undefined;
 let hoveredCard: Card | undefined;
 // Page whose explanation by Claude is under the pointer (Alt+K asks about it).
 let hoveredClaude: number | undefined;
+// Link of the PDF under the pointer.
+let hoveredLink: PageLink | undefined;
 // Notes just created with their card open: left empty, the mark goes too.
 const freshNotes = new Set<string>();
 // Claude's explanations (`paper.pdf.claude.md`) as received.
@@ -232,6 +245,7 @@ async function renderPage(pv: PageView): Promise<void> {
   }
   pv.renderedScale = scale;
   pv.task?.cancel();
+  loadLinks(pv);
   const viewport = pv.page.getViewport({ scale });
   const dpr = window.devicePixelRatio || 1;
   const canvas = document.createElement('canvas');
@@ -387,7 +401,7 @@ async function loadPdf(url: string): Promise<void> {
     type: 'module',
   });
   const data = await (await fetch(url)).arrayBuffer();
-  const pdf = await pdfjs.getDocument({
+  pdf = await pdfjs.getDocument({
     data,
     cMapUrl: distUri + 'pdfjs/cmaps/',
     cMapPacked: true,
@@ -779,6 +793,94 @@ function noteAt(pv: PageView, e: MouseEvent): Section | undefined {
     .filter((s) => s.anchor && s.page === pv.num)
     .sort((a, b) => top(b.anchor!) - top(a.anchor!))
     .find((s) => s.anchor!.rects.some((r) => x >= r.x - pad && x <= r.x + r.w + pad && y >= r.y - pad && y <= r.y + r.h + pad));
+}
+
+// ---------- Links of the PDF ----------
+
+// Links are only hit-tested (like marks); their tints lie below the text and ignore the pointer, so
+// text under them stays selectable and Alt+drag still marks an area.
+async function loadLinks(pv: PageView): Promise<void> {
+  if (pv.links) {
+    return;
+  }
+  pv.links = [];
+  const viewport = pv.page.getViewport({ scale: 1 });
+  const annotations = await pv.page.getAnnotations({ intent: 'display' });
+  const layer = el('div', 'links', pv.pageEl);
+  pv.links = annotations
+    .filter((a) => a.subtype === 'Link' && (a.dest || a.url))
+    .map((a) => {
+      const [x0, y0] = viewport.convertToViewportPoint(a.rect[0], a.rect[1]);
+      const [x1, y1] = viewport.convertToViewportPoint(a.rect[2], a.rect[3]);
+      const rect = {
+        x: Math.min(x0, x1) / pv.width,
+        y: Math.min(y0, y1) / pv.height,
+        w: Math.abs(x1 - x0) / pv.width,
+        h: Math.abs(y1 - y0) / pv.height,
+      };
+      const tint = el('div', 'pdf-link', layer);
+      Object.assign(tint.style, { left: `${rect.x * 100}%`, top: `${rect.y * 100}%`, width: `${rect.w * 100}%`, height: `${rect.h * 100}%` });
+      return { ...rect, url: a.url, dest: a.dest, el: tint };
+    });
+}
+
+function linkAt(pv: PageView, e: MouseEvent): PageLink | undefined {
+  const { x, y } = pagePoint(pv, e);
+  return pv.links?.find((l) => x >= l.x && x <= l.x + l.w && y >= l.y && y <= l.y + l.h);
+}
+
+function setHoveredLink(link: PageLink | undefined): void {
+  hoveredLink?.el.classList.remove('over');
+  link?.el.classList.add('over');
+  hoveredLink = link;
+}
+
+async function followLink(link: PageLink): Promise<void> {
+  if (link.url) {
+    post({ type: 'openLink', url: link.url });
+    return;
+  }
+  const dest = typeof link.dest === 'string' ? await pdf.getDestination(link.dest) : link.dest;
+  if (!dest) {
+    console.warn('PDF link without a destination', link.dest);
+    return;
+  }
+  const ref = dest[0] as number | Parameters<PDFDocumentProxy['getPageIndex']>[0];
+  const pv = pages[typeof ref === 'number' ? ref : await pdf.getPageIndex(ref)];
+  rememberPosition();
+  revealDestination(pv, dest);
+}
+
+// Scrolls an explicit destination ([page, { name }, ...coordinates], PDF points) to the top of the
+// window and flashes its line; the destination's zoom is ignored, the user's stays.
+function revealDestination(pv: PageView, dest: unknown[]): void {
+  const fit = (dest[1] as { name: string }).name;
+  const coords = dest.slice(2) as (number | null)[];
+  const left = fit === 'XYZ' || fit === 'FitV' || fit === 'FitBV' || fit === 'FitR' ? coords[0] : null;
+  const top = fit === 'XYZ' ? coords[1] : fit === 'FitH' || fit === 'FitBH' ? coords[0] : fit === 'FitR' ? coords[3] : null;
+  const [x, y] = pv.page.getViewport({ scale: 1 }).convertToViewportPoint(left ?? 0, top ?? 0);
+  const box = pv.pageEl.getBoundingClientRect();
+  const pageTop = top === null ? 0 : y;
+  const screenX = box.left + x * scale;
+  // Zoomed in, the target may lie beside the window (right column of a paper).
+  const dx = left !== null && (screenX < 0 || screenX > (window.innerWidth * 2) / 3) ? screenX - LINK_TOP_MARGIN : 0;
+  window.scrollBy(dx, box.top + pageTop * scale - LINK_TOP_MARGIN);
+  const flash = el('div', 'link-target', pv.pageEl);
+  flash.style.top = `${(pageTop / pv.height) * 100}%`;
+  flash.addEventListener('animationend', () => flash.remove());
+}
+
+// Where the window is, relative to a page: pixel offsets don't survive zooming or cards growing a row.
+function scrollPosition(): () => void {
+  const x = window.scrollX;
+  const pv = pages.find((p) => p.row.getBoundingClientRect().bottom > 0);
+  const offset = pv ? pv.pageEl.getBoundingClientRect().top / pv.pageEl.offsetHeight : 0;
+  return () => {
+    window.scrollTo({ left: x });
+    if (pv) {
+      window.scrollBy(0, pv.pageEl.getBoundingClientRect().top - offset * pv.pageEl.offsetHeight);
+    }
+  };
 }
 
 // ---------- Explanations by Claude ----------
@@ -1762,7 +1864,11 @@ function showPopover(): void {
 
 // ---------- Events ----------
 
+// Where the mouse went down (a click on a link must not have been a drag).
+let pressedAt = { x: 0, y: 0 };
+
 viewer.addEventListener('mousedown', (e) => {
+  pressedAt = { x: e.clientX, y: e.clientY };
   const target = e.target as HTMLElement;
   if (target.closest('.card')) {
     hidePopover();
@@ -1789,6 +1895,13 @@ viewer.addEventListener('click', (e) => {
   if (!pv || !window.getSelection()?.isCollapsed) {
     return;
   }
+  // A link wins over a mark around it: the mark can still be clicked beside the link.
+  const moved = Math.hypot(e.clientX - pressedAt.x, e.clientY - pressedAt.y) > MAX_CLICK_MOVE;
+  const link = e.altKey || e.shiftKey || moved ? undefined : linkAt(pv, e);
+  if (link) {
+    followLink(link);
+    return;
+  }
   const note = noteAt(pv, e);
   if (note) {
     openNote(note, false);
@@ -1801,17 +1914,23 @@ viewer.addEventListener('mousemove', (e) => {
   hoveredCard = [...cards.values()].find((c) => c.el === cardEl);
   hoveredClaude = (e.target as Element).closest?.('.claude') ? hoveredCard?.section.page : undefined;
   hoveredMark = undefined;
+  // Not while dragging a selection across it.
+  const link = pv && !e.buttons ? linkAt(pv, e) : undefined;
   if (pv) {
     const note = noteAt(pv, e);
     setHover(note?.key);
     hoveredMark = note?.key;
     pv.pageEl.classList.toggle('over-mark', !!note);
+    pv.pageEl.classList.toggle('over-link', !!link);
+    pv.pageEl.title = link?.url ?? '';
   }
+  setHoveredLink(link);
 });
 viewer.addEventListener('mouseleave', () => {
   hoveredMark = undefined;
   hoveredCard = undefined;
   hoveredClaude = undefined;
+  setHoveredLink(undefined);
 });
 
 // The focused card is `.selected` and its connector emphasized. Both stay while the window has lost
@@ -1819,6 +1938,9 @@ viewer.addEventListener('mouseleave', () => {
 for (const type of ['focusin', 'focusout']) {
   document.addEventListener(type, () =>
     setTimeout(() => {
+      for (const card of cards.values()) {
+        card.el.classList.toggle('selected', card.el.contains(document.activeElement));
+      }
       for (const path of document.querySelectorAll<SVGPathElement>('.lines path')) {
         path.classList.toggle('focus', !!cards.get(path.dataset.key!)?.el.contains(document.activeElement));
       }
@@ -1929,6 +2051,7 @@ function textRange(m: Match): Range | undefined {
 
 installSearch<Match>({
   content: viewer,
+  position: scrollPosition,
   async find(re) {
     const matches: Match[] = [];
     const infos = await Promise.all(pages.map(pageText));
@@ -1937,9 +2060,6 @@ installSearch<Match>({
         if (m[0]) {
           matches.push({ pv, info: infos[n], from: m.index, to: m.index + m[0].length });
         }
-      }
-      for (const card of cards.values()) {
-        card.el.classList.toggle('selected', card.el.contains(document.activeElement));
       }
     });
     return matches;

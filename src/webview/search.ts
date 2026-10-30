@@ -6,7 +6,7 @@ import './search.css';
 // Custom Highlight API, so the documents (ProseMirror, pdf.js text layers) stay untouched.
 // Esc goes back to where the search started; Cmd+Enter or a click into the document stays at the
 // match. VS Code's "Go Back"/"Go Forward" keys (`host.navigationKeys`, with the user's own bindings)
-// then switch between the start and the match.
+// then walk the history of such jumps (also links in a PDF, `rememberPosition`).
 
 export type SearchProvider<M> = {
   // Clicking in here closes the search and stays where the document is now.
@@ -20,6 +20,8 @@ export type SearchProvider<M> = {
   accept(match: M): void;
   // Extra state to restore when going back (e.g. the ProseMirror selection).
   origin?(): () => void;
+  // Restores the scroll position when going back; default: the window's scroll offset.
+  position?(): () => void;
 };
 
 // Height of the bar plus some room, kept free above a revealed match.
@@ -32,10 +34,10 @@ let searchId = 0;
 let timer: number | undefined;
 // The query changed and wasn't searched yet.
 let stale = false;
-// Goes back to where the search started (also after closing at the match, via the "Go Back" key).
-let restore: (() => void) | undefined;
-// After going back: returns to the match ("Go Forward" key).
-let forward: (() => void) | undefined;
+// Positions before a jump, latest last ("Go Back" key; also after closing the search at the match).
+const backStack: (() => void)[] = [];
+// Positions gone back from ("Go Forward" key); a new jump clears them.
+let forwardStack: (() => void)[] = [];
 
 const bar = document.createElement('div');
 bar.className = 'mdlive-search';
@@ -130,6 +132,7 @@ function step(delta: number): void {
 function captureOrigin(): () => void {
   const x = window.scrollX;
   const y = window.scrollY;
+  const position = provider.position?.() ?? (() => window.scrollTo(x, y));
   const focused = document.activeElement as HTMLElement | null;
   const selection = window.getSelection();
   const range = selection?.rangeCount ? selection.getRangeAt(0).cloneRange() : undefined;
@@ -141,20 +144,26 @@ function captureOrigin(): () => void {
       selection!.removeAllRanges();
       selection!.addRange(range);
     }
-    window.scrollTo(x, y);
+    position();
   };
 }
 
+// Call before a jump, so the "Go Back" key returns here.
+export function rememberPosition(): void {
+  backStack.push(captureOrigin());
+  forwardStack = [];
+}
+
 function goBack(): void {
-  forward = captureOrigin();
-  restore?.();
-  restore = undefined;
+  const target = backStack.pop();
+  forwardStack.push(captureOrigin());
+  target?.();
 }
 
 function goForward(): void {
-  restore = captureOrigin();
-  forward?.();
-  forward = undefined;
+  const target = forwardStack.pop();
+  backStack.push(captureOrigin());
+  target?.();
 }
 
 // Whether a key event matches a VS Code key binding like "cmd+-", "ctrl+shift+-" or "cmd+[BracketRight]".
@@ -185,8 +194,7 @@ function open(): void {
     return;
   }
   const selected = window.getSelection()?.toString().replace(/\s+/g, ' ').trim() ?? '';
-  restore = captureOrigin();
-  forward = undefined;
+  rememberPosition();
   if (selected && selected.length <= 200) {
     input.value = selected;
   }
@@ -243,8 +251,8 @@ export function installSearch<M>(searchProvider: SearchProvider<M>): void {
         return;
       }
       // Otherwise the keys reach VS Code and navigate between editors as usual.
-      const back = restore && host.navigationKeys.back.some((k) => matchesKey(e, k));
-      const ahead = forward && host.navigationKeys.forward.some((k) => matchesKey(e, k));
+      const back = backStack.length > 0 && host.navigationKeys.back.some((k) => matchesKey(e, k));
+      const ahead = forwardStack.length > 0 && host.navigationKeys.forward.some((k) => matchesKey(e, k));
       if ((back || ahead) && !isSearchOpen()) {
         e.preventDefault();
         e.stopImmediatePropagation();

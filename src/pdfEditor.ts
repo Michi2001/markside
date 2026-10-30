@@ -45,6 +45,7 @@ type WebviewMessage =
   | { type: 'selection'; text: string }
   | { type: 'askClaude'; page: number; quote?: string; rects?: Rect[]; color?: string; key?: string; note?: boolean; explanation?: boolean; drawings?: ClaudeDrawing[]; propose?: boolean }
   | { type: 'view'; page: number; pages: number }
+  | { type: 'openLink'; url: string }
   | { type: 'pageTexts'; texts: string[] }
   | { type: 'deleteExplanation'; page: number }
   | { type: 'editExplanation'; page: number; text: string; undoable: boolean }
@@ -499,6 +500,14 @@ export class PdfEditorProvider implements vscode.CustomReadonlyEditorProvider {
         case 'view':
           view.page = msg.page;
           view.pages = msg.pages;
+          break;
+        case 'openLink':
+          // The URL comes from the PDF, so nothing but web and mail links.
+          if (/^(https?|mailto):/i.test(msg.url)) {
+            vscode.env.openExternal(vscode.Uri.parse(msg.url));
+          } else {
+            vscode.window.showWarningMessage(`Link not opened: ${msg.url}`);
+          }
           break;
         case 'pageTexts':
           resolveTexts?.(msg.texts);

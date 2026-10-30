@@ -22,6 +22,7 @@ https://github.com/user-attachments/assets/1b1b6b3e-4b06-4faf-919f-758eef49fd7b
 - PDFs open with a notes column next to every page. Each page has its own note, and text or areas you highlight get their own notes.
 - Notes are full Markdown editors (images, math, lists, handwriting) and are placed **directly on the slide** when there is free space next to the highlight, otherwise in the margin, connected by a line.
 - Highlights in four colors or random custom colors; area snapshots; undo/redo; lecture-end markers between pages.
+- The PDF's own links work (citations, sections, URLs); VS Code's Go Back key returns to where you clicked.
 - Stored in `paper.pdf.md` next to the PDF; the PDF itself is never modified.
 
 ### Handwriting
@@ -117,6 +118,7 @@ In the PDF view (text selected in the PDF):
 | `Delete` (pointer over a highlight), `Shift+Delete` (in a note) | Delete highlight and note |
 | `Cmd+Z` / `Cmd+Shift+Z` (outside notes) | Undo/redo creating and deleting notes |
 | `Ctrl`+wheel / pinch | Zoom pages and notes together |
+| VS Code's Go Back / Go Forward (`Ctrl+-` / `Ctrl+Shift+-`, or your own bindings) | After following a link: back to where you clicked / forward to the target |
 
 ## Files on disk
 
