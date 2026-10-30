@@ -2,6 +2,7 @@ import type { Node as ProseNode } from '@milkdown/kit/prose/model';
 import { Plugin, PluginKey } from '@milkdown/kit/prose/state';
 import { Decoration, DecorationSet, type EditorView } from '@milkdown/kit/prose/view';
 import { $prose } from '@milkdown/kit/utils';
+import katex from 'katex';
 import type { Suggestion } from '../suggestions';
 import { post } from './host';
 
@@ -91,10 +92,33 @@ function anchorPos(doc: ProseNode, { quote, position }: Suggestion): number {
 
 const escape = (t: string) => t.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;');
 
+const MATH = /^(\$\$[\s\S]+?\$\$|\$[^$\n]+\$)$/;
+
+// Words and whitespace runs; a formula stays one token, so it is diffed and rendered as a whole.
+function tokens(text: string): string[] {
+  return text
+    .split(/(\$\$[\s\S]+?\$\$|\$[^$\n]+\$)/)
+    .flatMap((part, i) => (i % 2 ? [part] : part.split(/(\s+)/)))
+    .filter((t) => t !== '');
+}
+
+// Tokens as HTML, formulas via KaTeX.
+function render(list: string[]): string {
+  return list
+    .map((t) => {
+      if (!MATH.test(t)) {
+        return escape(t);
+      }
+      const display = t.startsWith('$$');
+      return katex.renderToString(t.slice(display ? 2 : 1, display ? -2 : -1), { throwOnError: false, displayMode: display });
+    })
+    .join('');
+}
+
 // Old and new source with only the changed middle marked, cut to a few words around it.
 function diffHtml(old: string, next: string): string {
-  const a = old.split(/(\s+)/);
-  const b = next.split(/(\s+)/);
+  const a = tokens(old);
+  const b = tokens(next);
   let pre = 0;
   while (pre < a.length && pre < b.length && a[pre] === b[pre]) {
     pre++;
@@ -104,16 +128,16 @@ function diffHtml(old: string, next: string): string {
     suf++;
   }
   const keep = CONTEXT_WORDS * 2;
-  const before = a.slice(Math.max(0, pre - keep), pre).join('');
-  const after = a.slice(a.length - suf, a.length - suf + keep).join('');
-  const removed = a.slice(pre, a.length - suf).join('');
-  const added = b.slice(pre, b.length - suf).join('');
+  const before = render(a.slice(Math.max(0, pre - keep), pre));
+  const after = render(a.slice(a.length - suf, a.length - suf + keep));
+  const removed = render(a.slice(pre, a.length - suf));
+  const added = render(b.slice(pre, b.length - suf));
   return [
     pre > keep ? '…' : '',
-    escape(before),
-    removed && `<del>${escape(removed)}</del>`,
-    added && `<ins>${escape(added)}</ins>`,
-    escape(after),
+    before,
+    removed && `<del>${removed}</del>`,
+    added && `<ins>${added}</ins>`,
+    after,
     suf > keep ? '…' : '',
   ].join('');
 }
