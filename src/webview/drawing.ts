@@ -199,6 +199,10 @@ function bounds(strokes: Stroke[]): { x1: number; y1: number; x2: number; y2: nu
   return { x1: Math.min(...xs), y1: Math.min(...ys), x2: Math.max(...xs), y2: Math.max(...ys) };
 }
 
+function strokeKind(stroke: Stroke): Ink {
+  return stroke.highlighter ? 'highlighter' : 'pen';
+}
+
 function translate(stroke: Stroke, dx: number, dy: number): Stroke {
   const round = (v: number): number => Number(v.toFixed(1));
   return { ...stroke, points: stroke.points.map(([x, y, p]) => [round(x + dx), round(y + dy), p]) };
@@ -494,6 +498,7 @@ export function openDrawingEditor(
   const redraw = (): void => {
     copyButton.disabled = selection.size === 0;
     pasteButton.disabled = clipboard.length === 0;
+    updateToolbar();
     const dpr = window.devicePixelRatio || 1;
     const { width, height } = stage.getBoundingClientRect();
     ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
@@ -598,6 +603,27 @@ export function openDrawingEditor(
   const clearSelection = (): void => {
     selection = new Set();
     offset = { dx: 0, dy: 0 };
+  };
+
+  // While the lasso holds a selection, the pens and size steps restyle it instead of switching the tool.
+  const selecting = (): boolean => tool === 'lasso' && selection.size > 0;
+  const selectedInk = (kind: Ink): Stroke[] => [...selection].filter((s) => strokeKind(s) === kind);
+  // `live`: continues the last undo step (free color picker being dragged).
+  const restyle = (change: (s: Stroke) => Stroke, live = false): void => {
+    const next = strokes.map((s) => (selection.has(s) ? change(s) : s));
+    selection = new Set(next.filter((_s, i) => selection.has(strokes[i])));
+    if (live) {
+      strokes = next;
+      onChange?.(strokes);
+    } else {
+      commit(next);
+    }
+    redraw();
+  };
+  const recolor = (kind: Ink, color: string, live = false): void => {
+    if (selectedInk(kind).some((s) => s.color !== color)) {
+      restyle((s) => (strokeKind(s) === kind ? { ...s, color } : s), live);
+    }
   };
 
   // ---------- Gestures per tool ----------
@@ -749,10 +775,13 @@ export function openDrawingEditor(
   const updateToolbar = (): void => {
     toolButtons.forEach(({ el, active }) => el.classList.toggle('active', active()));
   };
-  const toolButton = (className: string, title: string, html: string, active: () => boolean, select: () => void): HTMLButtonElement => {
+  // `format` handles the click while the lasso holds a selection; false: nothing to apply, select as usual.
+  const toolButton = (className: string, title: string, html: string, active: () => boolean, select: () => void, format?: () => boolean): HTMLButtonElement => {
     const el = button(className, title, html, () => {
-      select();
-      clearSelection();
+      if (!selecting() || !format?.()) {
+        select();
+        clearSelection();
+      }
       updateToolbar();
       redraw();
     });
@@ -851,7 +880,8 @@ export function openDrawingEditor(
     picker.type = 'color';
     const custom = element('label', 'mdlive-swatch mdlive-custom', picker);
     custom.title = 'Custom color';
-    const setColor = (color: string): void => {
+    const setColor = (color: string, live = false): void => {
+      recolor(kind, color, live);
       colors[kind][index] = color;
       saveColors(kind, colors[kind]);
       trayButtons[kind][index].innerHTML = ICONS[kind](color);
@@ -868,7 +898,12 @@ export function openDrawingEditor(
       el.dataset.color = color;
       return el;
     });
-    picker.addEventListener('input', () => setColor(picker.value));
+    let live = false;
+    picker.addEventListener('input', () => {
+      setColor(picker.value, live);
+      live = true;
+    });
+    picker.addEventListener('change', () => (live = false));
     setColor(colors[kind][index]);
     const grid = element('div', 'mdlive-grid', ...swatches, custom);
     // Two rows.
@@ -877,14 +912,26 @@ export function openDrawingEditor(
   };
 
   // Pens and highlighters sit in a tray at the bottom edge; the selected one slides up.
-  // Tapping the selected one again opens its color/size options.
+  // Tapping the selected one again opens its color/size options. With a lasso selection, a pen
+  // colors the selected pen strokes and a highlighter the selected highlights; there the pens
+  // already matching the selection slide up, and tapping one of them opens its options.
   const trayButton = (kind: Ink, index: number): HTMLButtonElement => {
-    const el: HTMLButtonElement = toolButton('mdlive-pen mdlive-ink', kind === 'pen' ? 'Pen' : 'Highlighter', ICONS[kind](colors[kind][index]), () => tool === kind && slot[kind] === index, () => {
+    const matches = (): boolean => selectedInk(kind).length > 0 && selectedInk(kind).every((s) => s.color === colors[kind][index]);
+    const el: HTMLButtonElement = toolButton('mdlive-pen mdlive-ink', kind === 'pen' ? 'Pen' : 'Highlighter', ICONS[kind](colors[kind][index]), () => (selecting() ? matches() : tool === kind && slot[kind] === index), () => {
       if (tool === kind && slot[kind] === index) {
         togglePopover(el, inkOptions(kind, index));
       }
       tool = kind;
       slot[kind] = index;
+    }, () => {
+      if (selectedInk(kind).length === 0) {
+        return false;
+      }
+      if (matches()) {
+        togglePopover(el, inkOptions(kind, index));
+      }
+      recolor(kind, colors[kind][index]);
+      return true;
     });
     return el;
   };
@@ -941,7 +988,7 @@ export function openDrawingEditor(
     button('mdlive-tool', 'Undo', ICONS.undo, () => history(undoStack, redoStack)),
     button('mdlive-tool', 'Redo', ICONS.redo, () => history(redoStack, undoStack)),
     separator(),
-    toolButton('mdlive-tool', 'Lasso: select and move strokes', ICONS.lasso, () => tool === 'lasso', () => (tool = 'lasso')),
+    toolButton('mdlive-tool', 'Lasso: select strokes, then move them or pick a pen or size for them', ICONS.lasso, () => tool === 'lasso', () => (tool = 'lasso')),
     copyButton,
     pasteButton,
     toolButton('mdlive-tool', 'Insert/remove space: drag everything below up or down', ICONS.space, () => tool === 'space', () => (tool = 'space')),
@@ -951,11 +998,16 @@ export function openDrawingEditor(
     separator(),
     ...SIZES.pen.map((_size, level) => {
       const dot = `<span class="mdlive-dot" style="width:${3 + level * 3}px;height:${3 + level * 3}px"></span>`;
-      return toolButton('mdlive-tool mdlive-size', `Size ${level + 1}`, dot, () => sizes[inkKind()] === SIZES[inkKind()][level], () => {
+      const sizeOf = (s: Stroke): number => SIZES[strokeKind(s)][level];
+      const active = (): boolean => (selecting() ? [...selection].every((s) => s.size === sizeOf(s)) : sizes[inkKind()] === SIZES[inkKind()][level]);
+      return toolButton('mdlive-tool mdlive-size', `Size ${level + 1}`, dot, active, () => {
         if (tool !== 'highlighter' && tool !== 'shape') {
           tool = 'pen';
         }
         sizes[inkKind()] = SIZES[inkKind()][level];
+      }, () => {
+        restyle((s) => ({ ...s, size: sizeOf(s) }));
+        return true;
       });
     }),
     separator(),
