@@ -14,6 +14,8 @@ type MdNode = { type: string; children?: MdNode[]; value?: string };
 const CONTAINERS = ['root', 'blockquote', 'listItem'];
 const VISIBLE_WITHOUT_TEXT = 'img, svg, video, br, hr';
 const EXTERNAL_OR_ANCHOR = /^([a-z][a-z0-9+.-]*:|\/\/|#)/i;
+// A lone <br /> is how Milkdown saves an empty paragraph; it turns it back into one itself.
+const EMPTY_LINE = /^\s*<br\s*\/?\s*>\s*$/i;
 
 // Milkdown may already have wrapped the node in a paragraph, depending on the plugin order.
 function convertHtmlBlocks(node: MdNode): void {
@@ -25,7 +27,7 @@ function convertHtmlBlocks(node: MdNode): void {
   }
   node.children = node.children?.map((child) => {
     const html = child.type === 'paragraph' && child.children?.length === 1 ? child.children[0] : child;
-    return html.type === 'html' ? { type: 'html-block', value: html.value } : child;
+    return html.type === 'html' && !EMPTY_LINE.test(html.value!) ? { type: 'html-block', value: html.value } : child;
   });
 }
 

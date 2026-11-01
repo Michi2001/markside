@@ -1,6 +1,7 @@
+import { joinBackward } from '@milkdown/kit/prose/commands';
 import { keymap } from '@milkdown/kit/prose/keymap';
 import { Fragment, type Node as ProseNode, type NodeRange } from '@milkdown/kit/prose/model';
-import { type Command, type EditorState, NodeSelection, TextSelection, type Transaction } from '@milkdown/kit/prose/state';
+import { type Command, type EditorState, NodeSelection, Selection, TextSelection, type Transaction } from '@milkdown/kit/prose/state';
 import type { EditorView } from '@milkdown/kit/prose/view';
 import { canJoin } from '@milkdown/kit/prose/transform';
 import { $prose } from '@milkdown/kit/utils';
@@ -200,8 +201,28 @@ function joinPreviousList(view: EditorView): void {
   }
 }
 
+// Milkdown's Backspace has no joinBackward: below an image (or another atom) it selects the image and
+// the next press deletes that, and the empty line stays forever. At the note's start it does nothing.
+const deleteEmptyParagraph: Command = (state, dispatch, view) => {
+  const { $from, empty } = state.selection;
+  if (!empty || $from.depth !== 1 || $from.parent.type.name !== 'paragraph' || $from.parent.content.size > 0) {
+    return false;
+  }
+  const index = $from.index(0);
+  if (index > 0) {
+    return state.doc.child(index - 1).isAtom && joinBackward(state, dispatch, view);
+  }
+  if (state.doc.childCount === 1) {
+    return false;
+  }
+  const tr = state.tr.delete(0, $from.after());
+  dispatch?.(tr.setSelection(Selection.near(tr.doc.resolve(0))).scrollIntoView());
+  return true;
+};
+
 export const moveBlocksKeymap = $prose(() =>
   keymap({
+    Backspace: deleteEmptyParagraph,
     'Alt-ArrowUp': moveBlocks(-1),
     'Alt-ArrowDown': moveBlocks(1),
   }),
