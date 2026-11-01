@@ -1041,6 +1041,7 @@ export function openDrawingEditor(
   });
 
   // Eraser: tapping it again while selected switches between stroke and point eraser.
+  // With a lasso selection it deletes the selected strokes instead.
   const eraserModes = element(
     'div',
     'mdlive-list',
@@ -1058,11 +1059,16 @@ export function openDrawingEditor(
       ),
     ),
   );
-  const eraserButton: HTMLButtonElement = toolButton('mdlive-tool mdlive-has-options', 'Eraser (tap again for stroke/point eraser)', ICONS.eraser, () => tool === 'eraser', () => {
+  const eraserButton: HTMLButtonElement = toolButton('mdlive-tool mdlive-has-options', 'Eraser (tap again for stroke/point eraser; deletes a lasso selection)', ICONS.eraser, () => tool === 'eraser', () => {
     if (tool === 'eraser') {
       togglePopover(eraserButton, [eraserModes]);
     }
     tool = 'eraser';
+  }, () => {
+    const rest = strokes.filter((s) => !selection.has(s));
+    clearSelection();
+    commit(rest);
+    return true;
   });
 
 
