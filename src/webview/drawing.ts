@@ -19,6 +19,13 @@ const MAX_ZOOM = 5;
 const GRID_COLOR = 'rgba(128, 128, 128, 0.25)';
 const SELECTION_COLOR = '#1c64d6';
 const ERASER_RADIUS = 10;
+const MIN_IMAGE_WIDTH = 40;
+const HANDLE_RADIUS = 7;
+// Distance (screen px) within which a corner of the selected image is grabbed.
+const HANDLE_REACH = { touch: 40, pen: 20 };
+// A finger counts as a tap (selects the image) up to this movement (px) and duration (ms); a resting palm doesn't.
+const TAP_MOVE = 10;
+const TAP_MS = 300;
 const PEN_COLORS = ['#1e1e1e', '#1c64d6', '#d6336c', '#2b9348'];
 const HIGHLIGHTER_COLORS = ['#fff200', '#7cfc7c', '#ff7edb'];
 const HIGHLIGHTER_OPACITY = 0.45;
@@ -41,7 +48,8 @@ export type Stroke = {
 
 // Fixed background image in world coordinates (drawing on a picture).
 // `nodeWidth` is the image's width attr in the note, restored when all strokes are removed.
-export type Background = { href: string; x: number; y: number; width: number; height: number; nodeWidth: number };
+// `resized`: its size was changed while drawing, so it stays an SVG (with that size) without strokes.
+export type Background = { href: string; x: number; y: number; width: number; height: number; nodeWidth: number; resized?: boolean };
 export type Drawing = { strokes: Stroke[]; image?: Background };
 // A file for `saveImage` (base64 data).
 export type DrawingFile = { name: string; mime: string; data: string };
@@ -97,7 +105,7 @@ export function hasBackground(src: string): boolean {
 
 // The SVG, or the plain background image again once all strokes are gone (no white border).
 export function drawingFile({ strokes, image }: Drawing): DrawingFile {
-  if (strokes.length === 0 && image) {
+  if (strokes.length === 0 && image && !image.resized) {
     const [, mime, data] = /^data:([^;,]+);base64,(.*)$/.exec(image.href)!;
     return { name: 'image', mime, data };
   }
@@ -208,6 +216,17 @@ function translate(stroke: Stroke, dx: number, dy: number): Stroke {
   return { ...stroke, points: stroke.points.map(([x, y, p]) => [round(x + dx), round(y + dy), p]) };
 }
 
+// Moves and scales a stroke lying on the image along with it.
+function scaleStroke(stroke: Stroke, from: Background, to: Background): Stroke {
+  const k = to.width / from.width;
+  const round = (v: number): number => Number(v.toFixed(1));
+  return {
+    ...stroke,
+    size: Number((stroke.size * k).toFixed(2)),
+    points: stroke.points.map(([x, y, p]) => [round(to.x + (x - from.x) * k), round(to.y + (y - from.y) * k), p]),
+  };
+}
+
 // Cropped to the strokes (and image): they are moved so the bounding box starts at PADDING.
 // On an image whose strokes all lie inside it, the SVG is exactly the image: no padding, no white border.
 function toSvg(strokes: Stroke[], image?: Background): string {
@@ -227,7 +246,7 @@ function toSvg(strokes: Stroke[], image?: Background): string {
   const moved = paintOrder(strokes).map((s) => translate(s, pad - box.x1, pad - box.y1));
   const phase = (v: number): number => Number((((v % GRID) + GRID) % GRID).toFixed(1));
   const gridShift = [phase(pad - box.x1), phase(pad - box.y1)];
-  const placed = image && { x: Number((image.x + pad - box.x1).toFixed(1)), y: Number((image.y + pad - box.y1).toFixed(1)), width: image.width, height: image.height, nodeWidth: image.nodeWidth };
+  const placed = image && { x: Number((image.x + pad - box.x1).toFixed(1)), y: Number((image.y + pad - box.y1).toFixed(1)), width: image.width, height: image.height, nodeWidth: image.nodeWidth, ...(image.resized ? { resized: true } : {}) };
   const width = Math.ceil(box.x2 - box.x1 + 2 * pad);
   const height = Math.ceil(box.y2 - box.y1 + 2 * pad);
   const paths = moved
@@ -416,17 +435,17 @@ function separator(): HTMLElement {
 // Mac, one finger on the iPad), zooming only scales it (pinch, Ctrl+wheel). Saved sizes don't change.
 // With a background image the surface is white and the image lies fixed under the strokes.
 // Resolves with the drawing, or null if cancelled (also via `signal`) or empty.
-// `onChange` gets the strokes after every change (the iPad page keeps a draft with them).
+// `onChange` gets the drawing after every change (the iPad page keeps a draft with it).
 export function openDrawingEditor(
   initial: Drawing,
   signal?: AbortSignal,
-  onChange?: (strokes: Stroke[]) => void,
+  onChange?: (drawing: Drawing) => void,
 ): Promise<Drawing | null> {
   open = true;
   let strokes = initial.strokes;
-  const image = initial.image;
-  const undoStack: Stroke[][] = [];
-  const redoStack: Stroke[][] = [];
+  let image = initial.image;
+  const undoStack: Drawing[] = [];
+  const redoStack: Drawing[] = [];
   let tool: Tool = 'pen';
   // Colors of the tray's pens and highlighters (changeable) and which one is selected.
   const colors = { pen: loadColors('pen', PEN_COLORS), highlighter: loadColors('highlighter', HIGHLIGHTER_COLORS) };
@@ -437,6 +456,9 @@ export function openDrawingEditor(
   let shape: Shape = 'line';
   // Strokes picked with the lasso (or below the space-tool line); `offset` previews a move.
   let selection = new Set<Stroke>();
+  // The background image is selected: its corners show handles that resize it.
+  let imageSelected = false;
+  let tap: { id: number; x: number; y: number; time: number } | null = null;
   let offset = { dx: 0, dy: 0 };
   let clipboard = loadClipboard();
   // Drawn on top while a gesture runs: the stroke being drawn, the lasso loop, the space-tool line.
@@ -464,7 +486,12 @@ export function openDrawingEditor(
   overlay.append(toolbar, stage);
   document.body.append(overlay);
   const ctx = canvas.getContext('2d')!;
-  const background = image && new Image();
+  const background = new Image();
+
+  const imageCorners = ({ x, y, width, height }: Background): number[][] => [[x, y], [x + width, y], [x, y + height], [x + width, y + height]];
+  const onImage = ([px, py]: number[]): boolean => !!image && px >= image.x && px <= image.x + image.width && py >= image.y && py <= image.y + image.height;
+  const onHandle = ([px, py]: number[], reach: number): boolean =>
+    !!image && imageSelected && imageCorners(image).some(([x, y]) => Math.hypot(px - x, py - y) < reach / zoom);
 
   const selectionBox = (): ReturnType<typeof bounds> | null => {
     if (selection.size === 0) {
@@ -518,8 +545,8 @@ export function openDrawingEditor(
     ctx.fill();
     ctx.scale(zoom, zoom);
     ctx.translate(-viewX, -viewY);
-    if (image && background!.naturalWidth > 0) {
-      ctx.drawImage(background!, image.x, image.y, image.width, image.height);
+    if (image && background.naturalWidth > 0) {
+      ctx.drawImage(background, image.x, image.y, image.width, image.height);
     }
     for (const stroke of paintOrder(strokes)) {
       const moving = selection.has(stroke);
@@ -561,6 +588,17 @@ export function openDrawingEditor(
       ctx.arc(x, y, r, 0, 2 * Math.PI);
       ctx.stroke();
     }
+    if (image && imageSelected) {
+      ctx.strokeStyle = SELECTION_COLOR;
+      ctx.fillStyle = SELECTION_COLOR;
+      ctx.lineWidth = 1.5 / zoom;
+      ctx.strokeRect(image.x, image.y, image.width, image.height);
+      for (const [x, y] of imageCorners(image)) {
+        ctx.beginPath();
+        ctx.arc(x, y, HANDLE_RADIUS / zoom, 0, 2 * Math.PI);
+        ctx.fill();
+      }
+    }
   };
 
   const resize = (): void => {
@@ -570,7 +608,7 @@ export function openDrawingEditor(
     canvas.height = Math.round(height * dpr);
     redraw();
   };
-  if (background) {
+  if (image) {
     background.onload = redraw;
     background.src = image.href;
   }
@@ -593,15 +631,17 @@ export function openDrawingEditor(
     redraw();
   };
 
-  const commit = (next: Stroke[]): void => {
-    undoStack.push(strokes);
+  const commit = (next: Stroke[], nextImage = image): void => {
+    undoStack.push({ strokes, image });
     redoStack.length = 0;
     strokes = next;
-    onChange?.(strokes);
+    image = nextImage;
+    onChange?.({ strokes, image });
   };
 
   const clearSelection = (): void => {
     selection = new Set();
+    imageSelected = false;
     offset = { dx: 0, dy: 0 };
   };
 
@@ -614,7 +654,7 @@ export function openDrawingEditor(
     selection = new Set(next.filter((_s, i) => selection.has(strokes[i])));
     if (live) {
       strokes = next;
-      onChange?.(strokes);
+      onChange?.({ strokes, image });
     } else {
       commit(next);
     }
@@ -736,6 +776,8 @@ export function openDrawingEditor(
         // A stroke is picked when most of its points lie inside the loop.
         const picked = strokes.filter((s) => s.points.filter(([x, y]) => insidePolygon(x, y, loop)).length > s.points.length / 2);
         selection = new Set(picked);
+        // A tap on the image, or a loop around all of it, selects the image.
+        imageSelected = !!image && ((picked.length === 0 && onImage(p)) || imageCorners(image).every(([x, y]) => insidePolygon(x, y, loop)));
       },
     };
   };
@@ -754,6 +796,46 @@ export function openDrawingEditor(
         preview = {};
         clearSelection();
         commit(moved);
+      },
+    };
+  };
+
+  // Drags the image corner nearest to the pen; the opposite corner stays, the aspect ratio is kept.
+  // Strokes lying mostly on the image scale with it, so annotations stay on what they mark.
+  const resizeGesture = (p: number[]): Gesture => {
+    const start = image!;
+    const before = strokes;
+    const onImage = new Set(
+      strokes.filter(
+        (s) => s.points.filter(([x, y]) => x >= start.x && x <= start.x + start.width && y >= start.y && y <= start.y + start.height).length > s.points.length / 2,
+      ),
+    );
+    const right = p[0] > start.x + start.width / 2;
+    const bottom = p[1] > start.y + start.height / 2;
+    return {
+      move(q) {
+        // The pen's movement projected onto the corner's diagonal.
+        const along = ((right ? 1 : -1) * (q[0] - p[0]) * start.width + (bottom ? 1 : -1) * (q[1] - p[1]) * start.height) / (start.width ** 2 + start.height ** 2);
+        const width = Math.max(MIN_IMAGE_WIDTH, Math.round(start.width * (1 + along)));
+        const height = Math.round((start.height * width) / start.width);
+        const next = {
+          ...start,
+          width,
+          height,
+          x: right ? start.x : start.x + start.width - width,
+          y: bottom ? start.y : start.y + start.height - height,
+          resized: true,
+        };
+        image = next;
+        strokes = before.map((s) => (onImage.has(s) ? scaleStroke(s, start, next) : s));
+      },
+      end() {
+        if (image !== start) {
+          const [after, afterImage] = [strokes, image];
+          strokes = before;
+          image = start;
+          commit(after, afterImage);
+        }
       },
     };
   };
@@ -788,11 +870,11 @@ export function openDrawingEditor(
     toolButtons.push({ el, active });
     return el;
   };
-  const history = (from: Stroke[][], to: Stroke[][]): void => {
+  const history = (from: Drawing[], to: Drawing[]): void => {
     if (from.length > 0) {
-      to.push(strokes);
-      strokes = from.pop()!;
-      onChange?.(strokes);
+      to.push({ strokes, image });
+      ({ strokes, image } = from.pop()!);
+      onChange?.({ strokes, image });
       clearSelection();
       redraw();
     }
@@ -1049,11 +1131,17 @@ export function openDrawingEditor(
       // Like OneNote: a finger inside the lasso selection drags it.
       const box = touches.size === 0 && selectionBox();
       const p = point(e);
+      if (touches.size === 0 && onHandle(p, HANDLE_REACH.touch)) {
+        gesturePointer = e.pointerId;
+        gesture = resizeGesture(p);
+        return;
+      }
       if (box && p[0] >= box.x1 && p[0] <= box.x2 && p[1] >= box.y1 && p[1] <= box.y2) {
         gesturePointer = e.pointerId;
         gesture = lassoGesture(p);
         return;
       }
+      tap = touches.size === 0 ? { id: e.pointerId, x: e.clientX, y: e.clientY, time: e.timeStamp } : null;
       touches.set(e.pointerId, { x: e.clientX, y: e.clientY });
       return;
     }
@@ -1068,13 +1156,22 @@ export function openDrawingEditor(
     // A pen without pressure support reports a constant 0.5 like a mouse.
     const pen = e.pointerType === 'pen' && e.pressure !== 0.5;
     const start = { eraser: eraseGesture, lasso: lassoGesture, space: spaceGesture, shape: shapeGesture, pen: drawGesture, highlighter: drawGesture };
-    gesture = start[tool](p, pen);
+    // Anywhere but on a handle, the pen goes on with its tool and the image is deselected.
+    if (onHandle(p, HANDLE_REACH.pen)) {
+      gesture = resizeGesture(p);
+    } else {
+      imageSelected = false;
+      gesture = start[tool](p, pen);
+    }
     redraw();
   });
 
   canvas.addEventListener('pointermove', (e) => {
     const touch = touches.get(e.pointerId);
     if (touch) {
+      if (tap && Math.hypot(e.clientX - tap.x, e.clientY - tap.y) > TAP_MOVE) {
+        tap = null;
+      }
       const rect = canvas.getBoundingClientRect();
       const [a, b] = [...touches.values()];
       if (!b) {
@@ -1108,6 +1205,14 @@ export function openDrawingEditor(
     touches.delete(e.pointerId);
     if (e.pointerId === gesturePointer) {
       endGesture();
+    }
+    // A finger tap selects the image or, elsewhere, deselects it.
+    if (tap?.id === e.pointerId) {
+      if (e.type === 'pointerup' && e.timeStamp - tap.time < TAP_MS) {
+        imageSelected = onImage(point(e));
+        redraw();
+      }
+      tap = null;
     }
   };
   // Blocks long-press selection, magnifier and callout menus for touches on the canvas (iPad).

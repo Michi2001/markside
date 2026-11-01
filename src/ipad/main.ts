@@ -36,6 +36,15 @@ function store(key: string, value: unknown): void {
   localStorage.setItem(key, JSON.stringify(value));
 }
 
+// A draft continues with its strokes and image size; the image data comes with the request.
+function withDraft(drawing: Drawing, draft: Draft): Drawing {
+  return { strokes: draft.strokes, image: drawing.image && { ...drawing.image, ...draft.image, href: drawing.image.href } };
+}
+
+function worthKeeping(draft: Draft): boolean {
+  return draft.strokes.length > 0 || !!draft.image?.resized;
+}
+
 function noteName(target: Target): string {
   return decodeURIComponent(target.note.split('/').pop()!);
 }
@@ -44,10 +53,10 @@ async function draw(id: number, drawing: Drawing, target: Target): Promise<void>
   const draft = load<Draft>(DRAFT);
   if (draft?.id === id) {
     // Page reloaded or reconnected: continue where the pen stopped.
-    edit(id, { ...drawing, strokes: draft.strokes }, target, true);
+    edit(id, withDraft(drawing, draft), target, true);
     return;
   }
-  if (draft && draft.strokes.length > 0) {
+  if (draft && worthKeeping(draft)) {
     store(ORPHAN, draft); // canvas of a request the Mac has dropped meanwhile
   }
   localStorage.removeItem(DRAFT);
@@ -63,7 +72,7 @@ async function draw(id: number, drawing: Drawing, target: Target): Promise<void>
       ? 'This drawing has changes from earlier that never reached the Mac. Continue with them?'
       : 'There is an unsaved new drawing from earlier. Continue with it?';
     const restore = confirm(question);
-    edit(id, restore ? { ...drawing, strokes: orphan.strokes } : drawing, target, restore);
+    edit(id, restore ? withDraft(drawing, orphan) : drawing, target, restore);
     return;
   }
   const where = orphan.target.src ? '' : ' It will be added at the end of that note.';
@@ -93,10 +102,9 @@ async function orphanDrawing({ target, image, strokes }: Draft): Promise<Drawing
 async function edit(id: number, drawing: Drawing, target: Target, restored: boolean): Promise<void> {
   currentId = id;
   abort = new AbortController();
-  const image = drawing.image && { ...drawing.image, href: '' };
-  const save = (strokes: Stroke[]): void => store(DRAFT, { id, target, image, strokes });
+  const save = ({ strokes, image }: Drawing): void => store(DRAFT, { id, target, image: image && { ...image, href: '' }, strokes });
   if (restored) {
-    save(drawing.strokes);
+    save(drawing);
   }
   const result = await openDrawingEditor(drawing, abort.signal, save);
   if (currentId !== id) {
@@ -170,7 +178,7 @@ function connect(): void {
       currentId = 0;
       // Cancelled from the Mac (notification closed, new request): keep what was drawn.
       const draft = load<Draft>(DRAFT);
-      if (draft && draft.strokes.length > 0) {
+      if (draft && worthKeeping(draft)) {
         store(ORPHAN, draft);
       }
       localStorage.removeItem(DRAFT);

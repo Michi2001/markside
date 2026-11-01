@@ -114,6 +114,8 @@ export async function editDrawing(
     editor.view().focus();
     return;
   }
+  // Resized while drawing: that size wins over a width set in the note.
+  const resized = drawing.image && isDrawing(path) && (await loadDrawing(resolveUrl(path))).image?.width !== drawing.image.width;
   const pos = getPos?.();
   if (pos === undefined) {
     editor.crepe.editor.action(insert(`![](${path})`));
@@ -124,7 +126,7 @@ export async function editDrawing(
     // Drawing → plain image (all strokes erased): the image gets its original width back.
     if (!isDrawing(path)) {
       tr.setNodeAttribute(pos, 'width', drawing.image!.nodeWidth ?? 0);
-    } else if (!isDrawing(src!)) {
+    } else if (!isDrawing(src!) || resized) {
       tr.setNodeAttribute(pos, 'width', 0);
     }
     view.dispatch(tr);
