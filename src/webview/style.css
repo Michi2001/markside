@@ -490,6 +490,16 @@ body[data-theme='dark'] {
   opacity: 0.85;
 }
 
+.mdlive-suggestion.stale {
+  opacity: 0.7;
+}
+
+.mdlive-suggestion .suggestion-stale {
+  margin-top: 2px;
+  font-size: 0.85em;
+  font-style: italic;
+}
+
 .mdlive-suggestion .suggestion-diff {
   margin: 4px 0;
   white-space: pre-wrap;

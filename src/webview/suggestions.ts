@@ -61,9 +61,10 @@ function words(text: string): Set<string> {
 }
 
 // After the textblock containing most words of the quote's last line (the quote is Markdown source,
-// the document rendered text; a quote spanning several blocks ends there), else at the end of the note.
-// Of equally good blocks (the same text twice) the one whose place in the note is closest to where
-// the extension found the quote (`position`, share of the source lines).
+// the document rendered text; a quote spanning several blocks ends there). Of equally good blocks (the
+// same text twice) the one whose place in the note is closest to where the extension found the quote
+// (`position`, share of the source lines). A quote without matching words (a code fence, a formula)
+// goes by `position` alone; one the extension didn't find (stale) to the end of the note.
 function anchorPos(doc: ProseNode, { quote, position }: Suggestion): number {
   const lines = quote.split('\n').map(words).filter((w) => w.size > 0);
   const wanted = lines[lines.length - 1] ?? new Set<string>();
@@ -77,13 +78,16 @@ function anchorPos(doc: ProseNode, { quote, position }: Suggestion): number {
     return false;
   });
   const top = Math.max(...blocks.map((b) => b.score));
-  if (!(top > 0.5)) {
+  const byWords = top > 0.5;
+  if (!blocks.length || (!byWords && position === undefined)) {
     return doc.content.size;
   }
-  const distance = (i: number) => (position === undefined ? i : Math.abs((i + 0.5) / blocks.length - position));
+  // Share of the document's size approximates the share of source lines better than the block index
+  // (a code block is one textblock but many lines).
+  const distance = (i: number) => (position === undefined ? i : Math.abs(blocks[i].end / doc.content.size - position));
   let best = -1;
   blocks.forEach((b, i) => {
-    if (b.score === top && (best === -1 || distance(i) < distance(best))) {
+    if ((!byWords || b.score === top) && (best === -1 || distance(i) < distance(best))) {
       best = i;
     }
   });
@@ -144,26 +148,28 @@ function diffHtml(old: string, next: string): string {
 
 function card(view: EditorView, s: Suggestion): HTMLElement {
   const box = document.createElement('div');
-  box.className = 'mdlive-suggestion';
+  // The extension sets `position` only when it found the quote; without it Apply could only fail.
+  const stale = s.position === undefined;
+  box.className = stale ? 'mdlive-suggestion stale' : 'mdlive-suggestion';
   box.contentEditable = 'false';
   box.dataset.id = s.id;
   box.innerHTML = `
     <div class="suggestion-head"><span class="suggestion-label">Suggested by Claude</span><span class="suggestion-title"></span></div>
+    ${stale ? '<div class="suggestion-stale">The quoted text is no longer in the note.</div>' : ''}
     <div class="suggestion-diff">${diffHtml(s.quote, s.body)}</div>
     ${s.why ? '<div class="suggestion-why"></div>' : ''}
-    <div class="suggestion-actions"><button class="suggestion-accept">Apply</button><button>Dismiss</button></div>`;
+    <div class="suggestion-actions">${stale ? '' : '<button class="suggestion-accept">Apply</button>'}<button class="suggestion-reject">Dismiss</button></div>`;
   box.querySelector('.suggestion-title')!.textContent = s.title;
   const why = box.querySelector('.suggestion-why');
   if (why) {
     why.textContent = s.why;
   }
-  const [accept, reject] = box.querySelectorAll('button');
-  const answer = (type: 'acceptSuggestion' | 'rejectSuggestion') => (e: MouseEvent) => {
+  const answer = (type: 'acceptSuggestion' | 'rejectSuggestion') => (e: Event) => {
     e.preventDefault();
     post({ type, id: s.id });
     setSuggestions(view, (suggestionKey.getState(view.state)?.list ?? []).filter((q) => q.id !== s.id));
   };
-  accept.addEventListener('mousedown', answer('acceptSuggestion'));
-  reject.addEventListener('mousedown', answer('rejectSuggestion'));
+  box.querySelector('.suggestion-accept')?.addEventListener('mousedown', answer('acceptSuggestion'));
+  box.querySelector('.suggestion-reject')!.addEventListener('mousedown', answer('rejectSuggestion'));
   return box;
 }
