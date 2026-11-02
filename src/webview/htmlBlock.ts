@@ -4,7 +4,7 @@ import { Plugin, PluginKey } from '@milkdown/kit/prose/state';
 import { Decoration, DecorationSet, type EditorView, type NodeView } from '@milkdown/kit/prose/view';
 import { $nodeSchema, $prose, $view } from '@milkdown/kit/utils';
 import DOMPurify from 'dompurify';
-import { post, resolveUrl } from './host';
+import { resolveUrl } from './host';
 
 // Block-level raw HTML (README headers, badges, <details>): shown rendered, stored verbatim.
 // Double-click edits the source. Inline HTML inside a paragraph stays Milkdown's plain `html` node.
@@ -13,7 +13,6 @@ type MdNode = { type: string; children?: MdNode[]; value?: string };
 
 const CONTAINERS = ['root', 'blockquote', 'listItem'];
 const VISIBLE_WITHOUT_TEXT = 'img, svg, video, br, hr';
-const EXTERNAL_OR_ANCHOR = /^([a-z][a-z0-9+.-]*:|\/\/|#)/i;
 // A lone <br /> is how Milkdown saves an empty paragraph; it turns it back into one itself.
 const EMPTY_LINE = /^\s*<br\s*\/?\s*>\s*$/i;
 
@@ -169,14 +168,8 @@ class HtmlBlockView implements NodeView {
   }
 
   private onClick(e: MouseEvent): void {
-    const target = e.target as Element;
-    const href = target.closest('a')?.getAttribute('href');
-    if (href && !EXTERNAL_OR_ANCHOR.test(href)) {
-      // VS Code would open the webview's resource URL in the browser.
-      e.preventDefault();
-      e.stopPropagation();
-      post({ type: 'openFile', path: href });
-    } else if (target.closest('summary') && isDetailsStart(this.node)) {
+    // Relative links are opened by `installShortcuts`' click listener.
+    if ((e.target as Element).closest('summary') && isDetailsStart(this.node)) {
       e.preventDefault();
       this.view.dispatch(this.view.state.tr.setMeta(detailsKey, this.getPos()));
     }

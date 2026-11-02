@@ -401,10 +401,27 @@ function clearFormatting(view: EditorView): void {
   view.dispatch(tr.setStoredMarks([]));
 }
 
+// Web links, mail links and anchors stay with VS Code's own click handler.
+const EXTERNAL_OR_ANCHOR = /^([a-z][a-z0-9+.-]*:|\/\/|#)/i;
+
 // Handled on the window (not as a ProseMirror keymap) so Alt+M also works while the formula tooltip
 // has focus. `ignore` skips keys meant for other parts of the page.
 // Alt+K mirrors the Claude Code shortcut for "Insert @-Mention Reference"; with Shift Claude may suggest changes.
 export function installShortcuts(ignore: (e: KeyboardEvent) => boolean): void {
+  // A relative link (another note, code with `#L12`) opens in VS Code; VS Code's own click handler
+  // would open the webview's resource URL in the browser.
+  window.addEventListener(
+    'click',
+    (e) => {
+      const href = (e.target as Element).closest?.('.milkdown a[href]')?.getAttribute('href');
+      if (href && !EXTERNAL_OR_ANCHOR.test(href)) {
+        e.preventDefault();
+        e.stopPropagation();
+        post({ type: 'openFile', path: href });
+      }
+    },
+    true,
+  );
   window.addEventListener(
     'keydown',
     (e) => {

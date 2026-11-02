@@ -627,7 +627,7 @@ export class PdfEditorProvider implements vscode.CustomReadonlyEditorProvider {
           queue(() => saveFolds(notes, msg.folds));
           break;
         case 'openFile':
-          openLinkedFile(notes, msg.path);
+          openLinkedFile(notes, msg.path, panel.viewColumn);
           break;
         case 'readClipboard':
           panel.webview.postMessage({ type: 'clipboardText', id: msg.id, text: await vscode.env.clipboard.readText() });

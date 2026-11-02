@@ -196,7 +196,7 @@ export class LiveEditorProvider implements vscode.CustomTextEditorProvider {
           }
           break;
         case 'openFile':
-          openLinkedFile(document.uri, msg.path);
+          openLinkedFile(document.uri, msg.path, panel.viewColumn);
           break;
         case 'readClipboard':
           panel.webview.postMessage({ type: 'clipboardText', id: msg.id, text: await vscode.env.clipboard.readText() });

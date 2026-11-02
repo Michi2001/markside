@@ -6,6 +6,10 @@ import type { Fold } from './webview/fold';
 const ASSETS_SUFFIX = '.assets';
 // Relative link to a sibling assets folder: `(foo.assets/123.png`, `"foo.assets/…`, `<foo.assets/…`.
 const ASSET_REF = /(?<=[("'<])([^\s/()"'<>]+)\.assets\/([\w.-]+)/g;
+// Path of a link in a note: Markdown links and images `](…)`, HTML `href="…"`/`src="…"` (fragment and query excluded).
+const LINK_REF = /(?<=\]\(<?|\b(?:href|src)=["'])[^\s)"'<>#?]+/g;
+// Web links, other schemes and absolute paths don't depend on the note's location.
+const NOT_RELATIVE = /^([a-z][a-z0-9+.-]*:|\/)/i;
 
 // Collapsed headings of the note (view state of the live editor), kept with the images so it moves with the note.
 const FOLDS_FILE = '.folds.json';
@@ -74,12 +78,19 @@ async function readText(uri: vscode.Uri): Promise<string> {
   return new TextDecoder().decode(await fs.readFile(uri));
 }
 
-// Saves image bytes into the note's assets folder and returns the Markdown-relative path.
-// Opens a file linked relatively from a note (link inside raw HTML).
-export function openLinkedFile(note: vscode.Uri, link: string): void {
-  const file = vscode.Uri.joinPath(note, '..', decodeURI(link.split(/[?#]/)[0]));
-  vscode.commands.executeCommand('vscode.open', file);
+// Opens a file linked relatively from a note in the group beside the note's (`column`): the one to the
+// left, or from the leftmost group the second one (created if missing). A GitHub-style fragment
+// (`#L12`, `#L12-L20`, `#L12C3`) selects those lines.
+export function openLinkedFile(note: vscode.Uri, link: string, column = vscode.ViewColumn.One): void {
+  const [file, fragment = ''] = link.split('#');
+  const target = vscode.Uri.joinPath(note, '..', decodeURI(file.split('?')[0]));
+  const lines = /^L(\d+)(?:C\d+)?(?:-L?(\d+))?/.exec(fragment);
+  const selection = lines ? new vscode.Range(+lines[1] - 1, 0, lines[2] ? +lines[2] : +lines[1] - 1, 0) : undefined;
+  const viewColumn = column === vscode.ViewColumn.One ? vscode.ViewColumn.Two : column - 1;
+  vscode.commands.executeCommand('vscode.open', target, { selection, viewColumn });
 }
+
+// Saves image bytes into the note's assets folder and returns the Markdown-relative path.
 
 export async function saveImage(note: vscode.Uri, name: string, mime: string, data: string): Promise<string> {
   const dir = assetsDir(note);
@@ -203,6 +214,28 @@ export async function cleanupAssets(document: vscode.TextDocument): Promise<void
   }
 }
 
+// Rewrites the relative links of a note moved from `oldNote` to `newNote` so they point at the same files:
+// targets inside the moved item (the note itself or a moved folder) moved along, all others stayed.
+// Links into the note's own assets folder are left to the folder's own move.
+function relinkMoved(text: string, oldNote: vscode.Uri, newNote: vscode.Uri, oldItem: vscode.Uri, newItem: vscode.Uri): string {
+  const oldDir = path.posix.dirname(oldNote.path);
+  const newDir = path.posix.dirname(newNote.path);
+  const ownAssets = assetsDir(oldNote).path + '/';
+  if (oldDir === newDir) {
+    return text;
+  }
+  return text.replace(LINK_REF, (link) => {
+    const target = path.posix.join(oldDir, decodeURI(link));
+    if (NOT_RELATIVE.test(link) || target.startsWith(ownAssets)) {
+      return link;
+    }
+    const moved = target === oldItem.path || target.startsWith(oldItem.path + '/');
+    const newTarget = moved ? newItem.path + target.slice(oldItem.path.length) : target;
+    const relative = path.posix.relative(newDir, newTarget);
+    return relative === decodeURI(link) ? link : relative.replaceAll(' ', '%20');
+  });
+}
+
 async function rewriteNote(note: vscode.Uri, change: (text: string) => Promise<string> | string): Promise<void> {
   const document = await vscode.workspace.openTextDocument(note);
   const text = await change(document.getText());
@@ -231,17 +264,30 @@ export function registerAssetSync(): vscode.Disposable {
           await vscode.workspace.applyEdit(edit);
           continue;
         }
+        // Notes inside a moved folder keep their links to files outside it.
+        if ((await fs.stat(newUri)).type === vscode.FileType.Directory) {
+          // An explicit exclude replaces files.exclude, which usually hides PDF notes.
+          const notes = await vscode.workspace.findFiles(new vscode.RelativePattern(newUri, '**/*.md'), '**/{node_modules,*.assets}/**');
+          for (const note of notes) {
+            const old = vscode.Uri.joinPath(oldUri, path.posix.relative(newUri.path, note.path));
+            await rewriteNote(note, (text) => relinkMoved(text, old, note, oldUri, newUri));
+          }
+          continue;
+        }
         if (!isNote(oldUri) || !isNote(newUri)) {
           continue;
         }
         const oldDir = assetsDir(oldUri);
         const newDir = assetsDir(newUri);
-        if (!(await exists(oldDir)) || (await exists(newDir))) {
-          continue;
+        const moveAssets = (await exists(oldDir)) && !(await exists(newDir));
+        if (moveAssets) {
+          await fs.rename(oldDir, newDir);
         }
-        await fs.rename(oldDir, newDir);
         const oldRef = new RegExp(`(?<=[("'<])${escapeRegExp(assetsRef(oldUri))}`, 'g');
-        await rewriteNote(newUri, (text) => text.replace(oldRef, assetsRef(newUri)));
+        await rewriteNote(newUri, (text) => {
+          const relinked = relinkMoved(text, oldUri, newUri, oldUri, newUri);
+          return moveAssets ? relinked.replace(oldRef, assetsRef(newUri)) : relinked;
+        });
       }
     }),
     vscode.workspace.onDidCreateFiles(async (e) => {
