@@ -2,7 +2,8 @@ import { Crepe } from '@milkdown/crepe';
 import '@milkdown/crepe/theme/common/style.css';
 import { imageBlockSchema } from '@milkdown/kit/component/image-block';
 import { commandsCtx, editorViewCtx, remarkPluginsCtx, remarkStringifyOptionsCtx } from '@milkdown/kit/core';
-import { clearTextInCurrentBlockCommand, listItemSchema } from '@milkdown/kit/preset/commonmark';
+import { clearTextInCurrentBlockCommand, inlineCodeSchema, listItemSchema } from '@milkdown/kit/preset/commonmark';
+import { toggleMark } from '@milkdown/kit/prose/commands';
 import { type EditorState, NodeSelection, Plugin, TextSelection } from '@milkdown/kit/prose/state';
 import { Decoration, DecorationSet, type EditorView } from '@milkdown/kit/prose/view';
 import { $prose, callCommand, insert, replaceAll } from '@milkdown/kit/utils';
@@ -283,8 +284,8 @@ function closeFormula(editor: NoteEditor, focus: boolean): boolean {
   return true;
 }
 
-// Inside a bullet list the shortcuts act on the whole text of the touched items, even if only part
-// of it (or nothing) is selected. Returns null outside lists.
+// The whole text of the list items the selection touches (Alt+Shift formatting, Alt+K without
+// selection). Returns null outside lists.
 export function listItemRange(state: EditorState): { from: number; to: number } | null {
   const { $from, $to } = state.selection;
   const inItem = ($pos: typeof $from) => $pos.parent.isTextblock && $pos.depth > 1 && $pos.node(-1).type.name === 'list_item';
@@ -362,19 +363,23 @@ const HEADING_KEYS: Record<string, number> = {
   Digit6: 6,
 };
 
-// Runs a formatting command; in lists it applies to the whole item text, then restores the cursor.
-// Highlights (and removing them) only expand to the whole item when nothing is selected. In an empty
-// item the format applies to what is typed next (stored marks, which a selection change would drop).
-export function runFormatCommand(editor: NoteEditor, command: string, payload?: unknown): void {
+// Runs a formatting command on the selection; with only a cursor it toggles the format for what is
+// typed next (stored marks). `wholeItem` (Alt+Shift) applies it to the whole text of the touched list
+// items instead, then restores the cursor.
+export function runFormatCommand(editor: NoteEditor, command: string, payload?: unknown, wholeItem = false): void {
   const view = editor.view();
-  const keepSelection = command === 'ToggleLatex' || (['ToggleHighlight', 'RemoveHighlight'].includes(command) && !view.state.selection.empty);
-  const item = keepSelection ? null : listItemRange(view.state);
+  const item = wholeItem && command !== 'ToggleLatex' ? listItemRange(view.state) : null;
   const range = item && item.from < item.to ? item : null;
   const { anchor, head } = view.state.selection;
   if (range) {
     view.dispatch(view.state.tr.setSelection(TextSelection.create(view.state.doc, range.from, range.to)));
   }
-  editor.crepe.editor.action(callCommand(command, payload));
+  if (command === 'ToggleInlineCode' && view.state.selection.empty) {
+    // Milkdown's ToggleInlineCode does nothing without a selection.
+    editor.crepe.editor.action((ctx) => toggleMark(inlineCodeSchema.type(ctx))(view.state, view.dispatch));
+  } else {
+    editor.crepe.editor.action(callCommand(command, payload));
+  }
   if (range) {
     view.dispatch(view.state.tr.setSelection(TextSelection.create(view.state.doc, anchor, head)));
   }
@@ -460,15 +465,15 @@ export function installShortcuts(ignore: (e: KeyboardEvent) => boolean): void {
       } else if (command) {
         e.preventDefault();
         e.stopPropagation();
-        runFormatCommand(editor, command);
+        runFormatCommand(editor, command, undefined, e.shiftKey);
       } else if (e.code === REMOVE_HIGHLIGHT_KEY) {
         e.preventDefault();
         e.stopPropagation();
-        runFormatCommand(editor, 'RemoveHighlight');
+        runFormatCommand(editor, 'RemoveHighlight', undefined, e.shiftKey);
       } else if (HIGHLIGHT_KEYS[e.code]) {
         e.preventDefault();
         e.stopPropagation();
-        runFormatCommand(editor, 'ToggleHighlight', HIGHLIGHT_KEYS[e.code]);
+        runFormatCommand(editor, 'ToggleHighlight', HIGHLIGHT_KEYS[e.code], e.shiftKey);
       } else if (CLEAR_KEYS.includes(e.code)) {
         e.preventDefault();
         e.stopPropagation();

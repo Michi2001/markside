@@ -77,7 +77,7 @@ The full manual with all features and settings is in [docs/usage.md](docs/usage.
 
 ### Keyboard shortcuts
 
-`Alt` is the `Option` key on a Mac. Formatting shortcuts toggle; in lists they apply to the whole item under the cursor.
+`Alt` is the `Option` key on a Mac. Formatting shortcuts toggle and apply to the selection; with only a cursor they switch the format on or off for the text typed next. With `Shift` added (`Alt+Shift+B`, …) they apply to the whole list item under the cursor.
 
 | Shortcut | Action |
 |---|---|
