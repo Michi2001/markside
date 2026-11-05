@@ -1,12 +1,12 @@
 import * as vscode from 'vscode';
 import { navigationKeys } from './keybindings';
-import { adoptAssets, claudeDrawingLines, cleanupAssets, loadFolds, openLinkedFile, proposalsUri, saveFolds, saveImage, writeClaudeContext } from './assets';
+import { adoptAssets, claudeImageLines, cleanupAssets, loadFolds, openLinkedFile, proposalsUri, saveFolds, saveImage, writeClaudeContext } from './assets';
 import { preserveSource } from './preserve';
 import { type Suggestion, findQuote, lineAt, parseSuggestions, removeSuggestion, suggestionSource } from './suggestions';
 import { DrawingServer, type DrawingFile, type DrawingTarget, getDrawingDevice } from './drawingServer';
 import type { FontSizes } from './fontSizes';
 import type { Fold } from './webview/fold';
-import type { ClaudeDrawing } from './webview/noteEditor';
+import type { ClaudeImage } from './webview/noteEditor';
 
 const CLAUDE_MENTION_COMMAND = 'claude-vscode.insertAtMention';
 
@@ -30,7 +30,7 @@ type WebviewMessage =
   | { type: 'saveImage'; id: number; name: string; mime: string; data: string }
   | { type: 'readClipboard'; id: number }
   | { type: 'openFile'; path: string }
-  | { type: 'selection'; text: string; drawings?: ClaudeDrawing[]; propose?: boolean; suggestion?: string }
+  | { type: 'selection'; text: string; images?: ClaudeImage[]; propose?: boolean; suggestion?: string }
   | { type: 'acceptSuggestion'; id: string }
   | { type: 'rejectSuggestion'; id: string }
   | { type: 'folds'; folds: Fold[] }
@@ -218,7 +218,7 @@ export class LiveEditorProvider implements vscode.CustomTextEditorProvider {
           await editQueue;
           await document.save();
           // Always a context file: it says whether Claude may suggest changes (an earlier Alt+Shift+K in the
-          // same chat must not carry over), names drawings as PNG (Claude can't see an SVG of strokes) and
+          // same chat must not carry over), names the selected images (drawings as PNG: Claude can't see an SVG of strokes) and
           // the PDFs next to the note (a note there is usually a summary of one).
           const context = await noteContext(document, msg, await siblingPdfs(document.uri), suggestions);
           await sendSelectionToClaude(await vscode.workspace.openTextDocument(context), panel, '');
@@ -425,10 +425,10 @@ async function siblingPdfs(note: vscode.Uri): Promise<vscode.Uri[]> {
 }
 
 // Context for a question about a note: the note, the selected text (or the suggestion asked about), the
-// drawings as PNG and the PDFs next to it; with `propose`, how Claude writes changes into `suggestions`.
+// images in it (drawings as PNG) and the PDFs next to it; with `propose`, how Claude writes changes into `suggestions`.
 async function noteContext(
   document: vscode.TextDocument,
-  { text: selected, drawings = [], propose, suggestion }: { text: string; drawings?: ClaudeDrawing[]; propose?: boolean; suggestion?: string },
+  { text: selected, images = [], propose, suggestion }: { text: string; images?: ClaudeImage[]; propose?: boolean; suggestion?: string },
   pdfs: vscode.Uri[],
   suggestions: vscode.Uri,
 ): Promise<vscode.Uri> {
@@ -443,7 +443,7 @@ async function noteContext(
     const where = range ? ` (lines ${range.start.line + 1}–${range.end.line + 1})` : '';
     lines.push('', `## Selected text${where}`, '', ...selected.trim().split('\n').map((line) => `> ${line}`));
   }
-  lines.push(...(await claudeDrawingLines(document.uri, drawings)));
+  lines.push(...(await claudeImageLines(document.uri, images)));
   if (pdfs.length) {
     lines.push(
       '', '## Original document', '',
@@ -455,7 +455,7 @@ async function noteContext(
   if (propose) {
     const task = source
       ? `Answer in the chat. If the answer changes your suggestion, revise its section \`## ${suggestion}\` in place (delete the section if it turns out wrong).`
-      : selected.trim()
+      : selected.trim() || images.length
         ? 'Answer in the chat, and suggest corrections to the selected passage where it needs them.'
         : `Review the whole note${pdfs.length ? ' against the original' : ''}: is it correct and precise, are there typos, is a central point missing? Give a short overview in the chat and suggest each correction.`;
     lines.push(

@@ -1,7 +1,7 @@
 import * as path from 'path';
 import * as vscode from 'vscode';
 import { navigationKeys } from './keybindings';
-import { claudeDrawingLines, cleanupAssets, explanationsUri, loadFolds, notesUri, openLinkedFile, proposalsUri, saveFolds, saveImage, suggestionsUri, writeClaudeContext } from './assets';
+import { claudeImageLines, cleanupAssets, explanationsUri, loadFolds, notesUri, openLinkedFile, proposalsUri, saveFolds, saveImage, suggestionsUri, writeClaudeContext } from './assets';
 import { DrawingServer, getDrawingDevice } from './drawingServer';
 import { type PdfView, explainSlides, getClaudeLanguage, isExplaining } from './explain';
 import type { FontSizes } from './fontSizes';
@@ -31,7 +31,7 @@ import {
   setNoteBody,
 } from './sidecar';
 import type { Fold } from './webview/fold';
-import type { ClaudeDrawing } from './webview/noteEditor';
+import type { ClaudeImage } from './webview/noteEditor';
 
 type WebviewMessage =
   | { type: 'ready' }
@@ -43,7 +43,7 @@ type WebviewMessage =
   | { type: 'saveImage'; id: number; name: string; mime: string; data: string }
   | { type: 'readClipboard'; id: number }
   | { type: 'selection'; text: string }
-  | { type: 'askClaude'; page: number; quote?: string; rects?: Rect[]; color?: string; key?: string; note?: boolean; explanation?: boolean; drawings?: ClaudeDrawing[]; propose?: boolean }
+  | { type: 'askClaude'; page: number; quote?: string; rects?: Rect[]; color?: string; key?: string; note?: boolean; explanation?: boolean; images?: ClaudeImage[]; propose?: boolean }
   | { type: 'view'; page: number; pages: number }
   | { type: 'openLink'; url: string }
   | { type: 'openFile'; path: string }
@@ -672,8 +672,8 @@ export class PdfEditorProvider implements vscode.CustomReadonlyEditorProvider {
             await writeProposals([...kept, proposal]);
           }
           const context = claudeContext(pdf, note?.getText(), await readExplanations(), msg, msg.propose ? { id, file: proposals, suggestions } : undefined);
-          const drawing = (await claudeDrawingLines(notes, msg.drawings ?? [])).join('\n');
-          const file = await writeClaudeContext(notes, drawing ? `${context}${drawing}\n` : context);
+          const images = (await claudeImageLines(notes, msg.images ?? [])).join('\n');
+          const file = await writeClaudeContext(notes, images ? `${context}${images}\n` : context);
           await sendSelectionToClaude(await vscode.workspace.openTextDocument(file), panel, '');
           break;
         }

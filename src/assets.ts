@@ -110,18 +110,27 @@ export async function writeClaudeContext(note: vscode.Uri, text: string): Promis
   return file;
 }
 
-// Saves the drawings asked about as PNG into the note's assets and returns the context lines naming them.
-export async function claudeDrawingLines(note: vscode.Uri, drawings: { src: string; png: string }[]): Promise<string[]> {
-  if (drawings.length === 0) {
+// Returns the context lines naming the images asked about; drawings are saved as PNG into the note's
+// assets first, other images are named by their path (relative links resolved from the note's folder).
+export async function claudeImageLines(note: vscode.Uri, images: { src: string; png?: string }[]): Promise<string[]> {
+  if (images.length === 0) {
     return [];
   }
   const dir = assetsDir(note);
   await fs.createDirectory(dir);
-  const lines = ['', drawings.length > 1 ? '## Drawings in question' : '## Drawing in question', '', 'My handwritten drawing, rendered as PNG; look at it with the Read tool:', ''];
-  for (const [i, drawing] of drawings.entries()) {
-    const file = vscode.Uri.joinPath(dir, `.claude-drawing-${i + 1}.png`);
-    await fs.writeFile(file, Buffer.from(drawing.png, 'base64'));
-    lines.push(`- \`${vscode.workspace.asRelativePath(file, false)}\` (linked in the note as \`${drawing.src}\`)`);
+  const lines = ['', images.length > 1 ? '## Images in question' : '## Image in question', '', 'Look at it with the Read tool:', ''];
+  for (const [i, image] of images.entries()) {
+    const linked = `linked in the note as \`${image.src}\``;
+    if (image.png) {
+      const file = vscode.Uri.joinPath(dir, `.claude-drawing-${i + 1}.png`);
+      await fs.writeFile(file, Buffer.from(image.png, 'base64'));
+      lines.push(`- \`${vscode.workspace.asRelativePath(file, false)}\` (my handwritten drawing, rendered as PNG; ${linked})`);
+    } else if (/^[a-z][a-z0-9+.-]*:/i.test(image.src)) {
+      lines.push(`- ${image.src}`);
+    } else {
+      const file = vscode.Uri.joinPath(note, '..', decodeURIComponent(image.src));
+      lines.push(`- \`${vscode.workspace.asRelativePath(file, false)}\` (${linked})`);
+    }
   }
   return lines;
 }

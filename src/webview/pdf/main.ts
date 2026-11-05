@@ -21,7 +21,7 @@ import {
   installShortcuts,
   listItemRange,
   runFormatCommand,
-  selectedDrawings,
+  selectedImages,
   setActiveEditor,
 } from '../noteEditor';
 import './pdf.css';
@@ -2199,13 +2199,13 @@ window.addEventListener(
       return;
     }
     // Alt+K in a note asks about the selected text or the bullet at the cursor, else the whole note;
-    // selected drawings go along as PNG.
+    // selected images go along (drawings as PNG).
     const cardState = focusedCard?.editor?.view().state;
     if (e.code === 'KeyK' && focusedCard && cardState) {
       e.preventDefault();
       e.stopImmediatePropagation();
       const ask = { type: 'askClaude', page: focusedCard.section.page, key: focusedCard.key, note: true, quote: questionText(cardState), propose: e.shiftKey };
-      selectedDrawings(cardState).then((drawings) => post({ ...ask, drawings }));
+      selectedImages(cardState).then((images) => post({ ...ask, images }));
       return;
     }
     // Alt+K outside the cards asks Claude about the selected text, the note card or mark under the

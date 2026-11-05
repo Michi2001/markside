@@ -295,21 +295,21 @@ export function listItemRange(state: EditorState): { from: number; to: number } 
   return { from: $from.start(), to: $to.end() };
 }
 
-// A drawing asked about with Alt+K: its link in the note and the drawing as PNG (base64).
-export type ClaudeDrawing = { src: string; png: string };
+// An image asked about with Alt+K: its link in the note and, for a drawing, the drawing as PNG (base64).
+export type ClaudeImage = { src: string; png?: string };
 
-// Drawings in the selection (a clicked drawing is selected as a node), rendered as PNG for Claude.
-export function selectedDrawings(state: EditorState): Promise<ClaudeDrawing[]> {
+// Images in the selection (a clicked image is selected as a node); drawings rendered as PNG for Claude.
+export function selectedImages(state: EditorState): Promise<ClaudeImage[]> {
   const srcs: string[] = [];
   state.doc.nodesBetween(state.selection.from, state.selection.to, (node) => {
-    if ((node.type.name === 'image-block' || node.type.name === 'image') && isDrawing(node.attrs.src)) {
+    if ((node.type.name === 'image-block' || node.type.name === 'image') && node.attrs.src) {
       srcs.push(node.attrs.src);
     }
   });
-  return Promise.all(srcs.map(async (src) => ({ src, png: await drawingPng(resolveUrl(src)) })));
+  return Promise.all(srcs.map(async (src) => (isDrawing(src) ? { src, png: await drawingPng(resolveUrl(src)) } : { src })));
 }
 
-// Sends the selected plain text of the active editor (and the drawings in it) to the extension (Alt+K → Claude);
+// Sends the selected plain text of the active editor (and the images in it) to the extension (Alt+K → Claude);
 // `propose` (Alt+Shift+K) lets Claude suggest changes. A selection in a suggestion card, or the card
 // under the pointer, asks about that suggestion.
 export async function sendSelection(propose = false): Promise<void> {
@@ -326,7 +326,7 @@ export async function sendSelection(propose = false): Promise<void> {
   }
   const { state } = active.view();
   const { from, to } = listItemRange(state) ?? state.selection;
-  post({ type: 'selection', text: state.doc.textBetween(from, to, '\n', ' '), drawings: await selectedDrawings(state), propose });
+  post({ type: 'selection', text: state.doc.textBetween(from, to, '\n', ' '), images: await selectedImages(state), propose });
 }
 
 // Alt+<key> formatting commands (Crepe/Milkdown command names).
