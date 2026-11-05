@@ -1580,19 +1580,20 @@ function selectionRects(range: Range, pv: PageView): Rect[] {
     }
     raw.push(...Array.from(sub.getClientRects()).filter((r) => r.width > 1 && r.height > 1));
   }
-  // Merges the pieces of each line.
+  // Merges the pieces of each line. The tallest pieces (the line's normal text) come first and set the
+  // line's height; smaller ones mostly inside it (sub-/superscripts in formulas) only widen it, so they
+  // aren't highlighted twice.
   const lines: { left: number; right: number; top: number; bottom: number }[] = [];
-  for (const r of raw.sort((a, b) => a.top - b.top)) {
-    const line = lines.find((l) => Math.abs((l.top + l.bottom) / 2 - (r.top + r.bottom) / 2) < r.height / 2);
+  for (const r of raw.sort((a, b) => b.height - a.height)) {
+    const line = lines.find((l) => Math.min(l.bottom, r.bottom) - Math.max(l.top, r.top) > r.height / 2);
     if (line) {
       line.left = Math.min(line.left, r.left);
       line.right = Math.max(line.right, r.right);
-      line.top = Math.min(line.top, r.top);
-      line.bottom = Math.max(line.bottom, r.bottom);
     } else {
       lines.push({ left: r.left, right: r.right, top: r.top, bottom: r.bottom });
     }
   }
+  lines.sort((a, b) => a.top - b.top);
   return lines.map((l) => ({
     x: (l.left - box.left) / box.width,
     y: (l.top - box.top) / box.height,
