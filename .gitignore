@@ -3,3 +3,4 @@ dist
 *.vsix
 notes/
 markside_demo
+.vscode/
