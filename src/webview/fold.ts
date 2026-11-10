@@ -3,11 +3,12 @@ import { type EditorState, Plugin, PluginKey, TextSelection } from '@milkdown/ki
 import { Decoration, DecorationSet, type EditorView } from '@milkdown/kit/prose/view';
 import { $prose } from '@milkdown/kit/utils';
 
-// Positions of collapsed top-level headings and list items. View-only state, never written to the Markdown.
+// Positions of collapsed top-level headings, list items and paragraphs introducing a list. View-only state, never written to the Markdown.
 const foldKey = new PluginKey<number[]>('mdlive-fold');
 
 // A collapsed node as stored in the note's assets folder: the `n`-th heading with this level and text,
-// or for `level` 0 the `n`-th list item with this text (of its first paragraph).
+// for `level` 0 the `n`-th list item with this text (of its first paragraph), for `level` -1 the `n`-th
+// top-level paragraph with this text that is directly followed by a list.
 export type Fold = { level: number; text: string; n: number };
 
 function isHeading(node: ProseNode | null | undefined): boolean {
@@ -20,6 +21,16 @@ function isItem(node: ProseNode | null | undefined): boolean {
 
 function hasSublist(item: ProseNode): boolean {
   return item.childCount > 1;
+}
+
+function isList(node: ProseNode | null | undefined): boolean {
+  return node?.type.name === 'bullet_list' || node?.type.name === 'ordered_list';
+}
+
+// Top-level paragraph at `pos` directly followed by a list (which it collapses).
+function leadsList(doc: ProseNode, pos: number): boolean {
+  const node = doc.nodeAt(pos);
+  return node?.type.name === 'paragraph' && doc.resolve(pos).depth === 0 && isList(doc.nodeAt(pos + node.nodeSize));
 }
 
 // Range hidden by the heading at `pos`: the following top-level blocks up to the next heading of the same or a higher level.
@@ -42,15 +53,19 @@ function hiddenRange(doc: ProseNode, pos: number): { from: number; to: number } 
   if (isHeading(node)) {
     return { from: pos + node.nodeSize, to: sectionEnd(doc, pos) };
   }
+  if (!isItem(node)) {
+    const list = doc.nodeAt(pos + node.nodeSize)!;
+    return { from: pos + node.nodeSize, to: pos + node.nodeSize + list.nodeSize };
+  }
   return { from: pos + 1 + node.firstChild!.nodeSize, to: pos + node.nodeSize - 1 };
 }
 
-// Top-level headings and all list items with the key they are stored under.
+// Top-level headings, paragraphs introducing a list and all list items with the key they are stored under.
 function foldables(doc: ProseNode): { pos: number; fold: Fold }[] {
   const result: { pos: number; fold: Fold }[] = [];
   const seen = new Map<string, number>();
   const add = (node: ProseNode, pos: number, level: number) => {
-    const text = (level === 0 ? node.firstChild! : node).textContent;
+    const text = (isItem(node) ? node.firstChild! : node).textContent;
     const id = `${level} ${text}`;
     const n = seen.get(id) ?? 0;
     seen.set(id, n + 1);
@@ -59,6 +74,8 @@ function foldables(doc: ProseNode): { pos: number; fold: Fold }[] {
   doc.forEach((node, pos) => {
     if (isHeading(node)) {
       add(node, pos, node.attrs.level);
+    } else if (leadsList(doc, pos)) {
+      add(node, pos, -1);
     }
   });
   doc.descendants((node, pos) => {
@@ -146,7 +163,7 @@ export const foldPlugin = (onChange: (folds: Fold[]) => void) =>
               .concat(found.map((f) => f.pos))
               .filter((pos, i, all) => {
                 const node = state.doc.nodeAt(pos);
-                return all.indexOf(pos) === i && (isHeading(node) || (isItem(node) && hasSublist(node!)));
+                return all.indexOf(pos) === i && (isHeading(node) || (isItem(node) && hasSublist(node!)) || leadsList(state.doc, pos));
               });
             if (meta !== undefined) {
               next = next.includes(meta) ? next.filter((pos) => pos !== meta) : [...next, meta];
@@ -176,19 +193,33 @@ export const foldPlugin = (onChange: (folds: Fold[]) => void) =>
                 decorations.push(badge(pos, pos + node.nodeSize - 1, count === 1 ? '1 block' : `${count} blocks`));
                 continue;
               }
+              if (!isItem(node)) {
+                // Paragraph introducing a list: the list is hidden, badge after the paragraph.
+                const list = state.doc.nodeAt(pos + node.nodeSize)!;
+                hide(pos + node.nodeSize, list);
+                let count = 0;
+                list.descendants((n) => {
+                  count += isItem(n) ? 1 : 0;
+                });
+                decorations.push(badge(pos, pos + node.nodeSize - 1, count === 1 ? '1 item' : `${count} items`));
+                continue;
+              }
               // List item: ring around its bullet, badge after its first paragraph, sublists hidden.
               decorations.push(Decoration.node(pos, pos + node.nodeSize, { class: 'mdlive-collapsed-item' }));
               let count = 0;
+              let images = 0;
               node.forEach((child, offset) => {
                 if (offset > 0) {
                   hide(pos + 1 + offset, child);
+                  images += child.type.name === 'image-block' ? 1 : 0;
                   child.descendants((n) => {
                     count += isItem(n) ? 1 : 0;
                   });
                 }
               });
               const end = pos + node.firstChild!.nodeSize;
-              decorations.push(badge(pos, end, count === 1 ? '1 sub-item' : `${count} sub-items`));
+              const label = count > 0 ? (count === 1 ? '1 sub-item' : `${count} sub-items`) : images === 1 ? '1 image' : `${images} images`;
+              decorations.push(badge(pos, end, label));
             }
             return DecorationSet.create(state.doc, decorations);
           },
@@ -229,12 +260,30 @@ function currentItem(state: EditorState): number | null {
   return items.find((pos) => hasSublist(state.doc.nodeAt(pos)!)) ?? null;
 }
 
-// Alt+Y: collapses/expands the list item or heading section the cursor is in; the cursor moves to the end
-// of that item's first paragraph or of the heading.
+// Top-level paragraph introducing a list, if the cursor is in it or in a top-level item of that list.
+function currentLead(state: EditorState): number | null {
+  const { $head } = state.selection;
+  if ($head.depth === 0) {
+    return null;
+  }
+  const index = $head.index(0);
+  const pos = $head.posAtIndex(index, 0);
+  if (leadsList(state.doc, pos)) {
+    return pos;
+  }
+  if (isList(state.doc.child(index)) && index > 0) {
+    const before = pos - state.doc.child(index - 1).nodeSize;
+    return leadsList(state.doc, before) ? before : null;
+  }
+  return null;
+}
+
+// Alt+Y: collapses/expands the list item, the paragraph introducing a list or the heading section the
+// cursor is in; the cursor moves to the end of that item's first paragraph, the paragraph or the heading.
 export function toggleFold(view: EditorView): void {
   const { state } = view;
   const item = currentItem(state);
-  const pos = item ?? currentHeading(state);
+  const pos = item ?? currentLead(state) ?? currentHeading(state);
   if (pos === null) {
     return;
   }

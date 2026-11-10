@@ -23,7 +23,7 @@ function escapeAttr(value: string): string {
 }
 
 // Turns a standalone `<img src=".." width="300">` HTML node into an image-block mdast node.
-function htmlImageToBlock(node: MdNode): MdNode | undefined {
+export function htmlImageToBlock(node: MdNode): MdNode | undefined {
   const html = (node.value ?? '').trim();
   if (node.type !== 'html' || !/^<img\s[^>]*>$/i.test(html)) {
     return undefined;
@@ -46,7 +46,8 @@ function convertHtmlImages(node: MdNode): void {
     const block = htmlImageToBlock(target);
     if (block) {
       children[i] = block;
-    } else {
+    } else if (child.type !== 'paragraph') {
+      // Not into paragraphs: an <img> among text stays inline (images in list items: listImages.ts).
       convertHtmlImages(child);
     }
   });

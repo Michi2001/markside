@@ -345,6 +345,11 @@ body[data-theme='dark'] {
   padding: 1px 0;
 }
 
+/* Image-only bullet: its empty first paragraph is hidden unless the cursor is in it (listImages.ts). */
+.milkdown .milkdown-list-item-block li p.mdlive-image-lead {
+  display: none;
+}
+
 /* Block-level raw HTML, rendered (htmlBlock.ts) */
 .milkdown .ProseMirror .mdlive-html {
   margin: 0.5em 0;

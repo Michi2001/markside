@@ -16,6 +16,7 @@ import { drawRemotely, host, post, readClipboard, resolveUrl, saveFile, uploadIm
 import { htmlBlock, remarkHtmlBlocks } from './htmlBlock';
 import { createImageBlockView, extendImageBlockSchema, remarkHtmlImages } from './imageView';
 import { indentListItems, moveBlocksKeymap } from './moveBlocks';
+import { insertListImage, listImages, listItemHandler, remarkListImages } from './listImages';
 import './style.css';
 
 // A Crepe editor for one piece of Markdown: the whole note in the Markdown editor, one annotation in
@@ -86,7 +87,9 @@ function imageFiles(data: DataTransfer | null): File[] {
 async function insertImages(editor: NoteEditor, files: File[]): Promise<void> {
   for (const file of files) {
     const path = await uploadImage(file);
-    editor.crepe.editor.action(insert(`![](${path})`));
+    if (!insertListImage(editor.view(), path)) {
+      editor.crepe.editor.action(insert(`![](${path})`));
+    }
   }
 }
 
@@ -119,7 +122,9 @@ export async function editDrawing(
   const resized = drawing.image && isDrawing(path) && (await loadDrawing(resolveUrl(path))).image?.width !== drawing.image.width;
   const pos = getPos?.();
   if (pos === undefined) {
-    editor.crepe.editor.action(insert(`![](${path})`));
+    if (!insertListImage(editor.view(), path)) {
+      editor.crepe.editor.action(insert(`![](${path})`));
+    }
   } else {
     const view = editor.view();
     const tr = view.state.tr.setNodeAttribute(pos, 'src', path);
@@ -175,8 +180,8 @@ export async function createNoteEditor(
     },
   };
   crepe.editor.config((ctx) => {
-    ctx.update(remarkStringifyOptionsCtx, (prev) => ({ ...prev, bullet: '-' as const }));
-    ctx.update(remarkPluginsCtx, (prev) => [...prev, remarkHtmlImages, remarkHtmlBlocks]);
+    ctx.update(remarkStringifyOptionsCtx, (prev) => ({ ...prev, bullet: '-' as const, handlers: { ...prev.handlers, listItem: listItemHandler } }));
+    ctx.update(remarkPluginsCtx, (prev) => [...prev, remarkHtmlImages, remarkListImages, remarkHtmlBlocks]);
     ctx.update(imageBlockSchema.key, extendImageBlockSchema);
     // Milkdown creates new list items as loose (`spread: true`), so an item that gets a sublist was
     // saved with a blank line before it. Parsed items keep the spread of their Markdown.
@@ -194,7 +199,7 @@ export async function createNoteEditor(
       onChange(markdown);
     });
   });
-  crepe.editor.use(moveBlocksKeymap).use(highlight).use(dim).use(htmlBlock).use(aiAnnotations);
+  crepe.editor.use(moveBlocksKeymap).use(listImages).use(highlight).use(dim).use(htmlBlock).use(aiAnnotations);
   configure?.(crepe);
   await crepe.create();
   const view = editor.view();

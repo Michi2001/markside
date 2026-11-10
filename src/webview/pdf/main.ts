@@ -496,29 +496,33 @@ function createCard(section: Section): Card {
   });
   // A mark whose note stays empty is kept as a plain highlight (removed if it was only just created
   // for this note); its card goes once the focus leaves it (not while drawing into it).
-  cardEl.addEventListener('focusout', () => {
-    setTimeout(() => {
-      const left = !cardEl.contains(document.activeElement) && !isDrawingOpen();
-      if (cards.get(card.key) !== card || !left) {
-        return;
+  const leave = () => {
+    // Focus went to another editor group: the card stays as it is until the view gets it back.
+    if (!document.hasFocus()) {
+      window.addEventListener('focus', () => setTimeout(leave, 200), { once: true });
+      return;
+    }
+    const left = !cardEl.contains(document.activeElement) && !isDrawingOpen();
+    if (cards.get(card.key) !== card || !left) {
+      return;
+    }
+    // No longer kept in its spot: it may move (onto the page, or off it when it grew over its text).
+    card.inMargin = false;
+    scheduleLayout(pv);
+    if (card.editor) {
+      removeEmptyItems(card.editor.view());
+    }
+    const fresh = freshNotes.delete(card.key);
+    if (card.section.anchor && isEmpty(card)) {
+      if (fresh) {
+        removeNote(card.key, true);
+      } else {
+        dropCard(card);
+        layoutRow(pv);
       }
-      // No longer kept in its spot: it may move (onto the page, or off it when it grew over its text).
-      card.inMargin = false;
-      scheduleLayout(pv);
-      if (card.editor) {
-        removeEmptyItems(card.editor.view());
-      }
-      const fresh = freshNotes.delete(card.key);
-      if (card.section.anchor && isEmpty(card)) {
-        if (fresh) {
-          removeNote(card.key, true);
-        } else {
-          dropCard(card);
-          layoutRow(pv);
-        }
-      }
-    }, 200);
-  });
+    }
+  };
+  cardEl.addEventListener('focusout', () => setTimeout(leave, 200));
   cardEl.addEventListener('mouseenter', () => setHover(card.key));
   cardEl.addEventListener('mouseleave', () => setHover(undefined));
   new ResizeObserver(() => scheduleLayout(pv)).observe(cardEl);
@@ -1215,7 +1219,7 @@ function layoutRow(pv: PageView): void {
   const pageHeight = (pv.height * scale) / z;
   const rowCards = cardsOf(pv);
   const pinned = (card: Card) =>
-    !!card.inMargin || (card.place !== undefined && card.el.contains(document.activeElement));
+    !!card.inMargin || (card.place !== undefined && card.el.contains(focusedElement()));
   const trying = rowCards.filter((card) => !pinned(card) && card.section.anchor && pv.ink);
   for (const card of rowCards) {
     if (card.inMargin) {
@@ -1331,7 +1335,7 @@ function layoutRow(pv: PageView): void {
   const clampHeight = CLAMPED_EM * noteFontSize();
   let tops = stackMargin(margin, overhangs, heights, desired);
   const tall = margin
-    .filter((card) => heights.get(card)! > clampHeight * CLAMP_MIN_SHARE && !card.el.contains(document.activeElement))
+    .filter((card) => heights.get(card)! > clampHeight * CLAMP_MIN_SHARE && !card.el.contains(focusedElement()))
     .sort((a, b) => heights.get(b)! - heights.get(a)!);
   for (const card of tall) {
     if (bottomOf(tops) <= pageHeight) {
@@ -1549,7 +1553,7 @@ function drawLines(pv: PageView, placed: { card: Card; top: number }[], heights:
     path.classList.toggle('to-margin', !card.place);
     path.dataset.color = anchor.color;
     setCustomColor(path, anchor.color);
-    path.classList.toggle('focus', card.el.contains(document.activeElement));
+    path.classList.toggle('focus', card.el.contains(focusedElement()));
     pv.lines.append(path);
   }
 }
@@ -1946,16 +1950,26 @@ viewer.addEventListener('mouseleave', () => {
   setHoveredLink(undefined);
 });
 
+// The element focused last in the view. Kept while another editor group has the focus, so a focused
+// card stays selected and unclamped until the focus moves elsewhere in this view.
+let lastFocused: Element | null = null;
+function focusedElement(): Element | null {
+  if (document.hasFocus()) {
+    lastFocused = document.activeElement;
+  }
+  return lastFocused;
+}
+
 // The focused card is `.selected` and its connector emphasized. Both stay while the window has lost
-// the focus (the active element is kept), until the focus moves elsewhere in the view.
-for (const type of ['focusin', 'focusout']) {
+// the focus, until the focus moves elsewhere in the view (a click there may not move the focus).
+for (const type of ['focusin', 'focusout', 'mousedown']) {
   document.addEventListener(type, () =>
     setTimeout(() => {
       for (const card of cards.values()) {
-        card.el.classList.toggle('selected', card.el.contains(document.activeElement));
+        card.el.classList.toggle('selected', card.el.contains(focusedElement()));
       }
       for (const path of document.querySelectorAll<SVGPathElement>('.lines path')) {
-        path.classList.toggle('focus', !!cards.get(path.dataset.key!)?.el.contains(document.activeElement));
+        path.classList.toggle('focus', !!cards.get(path.dataset.key!)?.el.contains(focusedElement()));
       }
     }),
   );
