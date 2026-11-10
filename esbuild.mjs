@@ -40,6 +40,16 @@ const configs = [
     assetNames: 'assets/[name]-[hash]',
   },
   {
+    // Mermaid, loaded on demand by src/webview/mermaid.ts (both webviews).
+    entryPoints: ['src/webview/mermaidBundle.ts'],
+    bundle: true,
+    outfile: 'dist/mermaid.js',
+    platform: 'browser',
+    format: 'iife',
+    target: 'es2022',
+    minify: !watch,
+  },
+  {
     // Drawing page for the iPad, served by src/drawingServer.ts.
     entryPoints: ['src/ipad/main.ts'],
     bundle: true,

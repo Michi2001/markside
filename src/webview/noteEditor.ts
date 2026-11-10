@@ -17,6 +17,7 @@ import { htmlBlock, remarkHtmlBlocks } from './htmlBlock';
 import { createImageBlockView, extendImageBlockSchema, remarkHtmlImages } from './imageView';
 import { indentListItems, moveBlocksKeymap } from './moveBlocks';
 import { insertListImage, listImages, listItemHandler, remarkListImages } from './listImages';
+import { renderMermaid } from './mermaid';
 import './style.css';
 
 // A Crepe editor for one piece of Markdown: the whole note in the Markdown editor, one annotation in
@@ -154,6 +155,8 @@ export async function createNoteEditor(
       [Crepe.Feature.Placeholder]: placeholder ? { text: placeholder, mode: 'doc' } : {},
       [Crepe.Feature.ImageBlock]: { onUpload: uploadImage, proxyDomURL: resolveUrl },
       [Crepe.Feature.ListItem]: { bulletIcon: BULLET_ICON },
+      // Diagrams show only the preview until "Edit" is clicked (also LaTeX blocks).
+      [Crepe.Feature.CodeMirror]: { renderPreview: renderMermaid, previewOnlyByDefault: true },
       [Crepe.Feature.BlockEdit]: {
         buildMenu: (builder) => {
           builder.getGroup('advanced').addItem('handwriting', {

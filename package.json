@@ -446,6 +446,7 @@
     "@milkdown/kit": "^7.22.3",
     "dompurify": "^3.4.17",
     "katex": "^0.19.0",
+    "mermaid": "^12.3.0",
     "pdfjs-dist": "^6.4.299",
     "remark": "^15.0.1",
     "remark-gfm": "^4.0.1",

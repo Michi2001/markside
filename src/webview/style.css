@@ -591,3 +591,16 @@ body[data-theme='dark'] {
 .mdlive-suggestion button:hover {
   filter: brightness(1.1);
 }
+
+/* Mermaid diagrams in code block previews (mermaid.ts). */
+.milkdown .milkdown-code-block .preview svg[id^='mdlive-mermaid'] {
+  max-width: 100%;
+  height: auto;
+}
+
+.mdlive-mermaid-error {
+  color: var(--vscode-errorForeground);
+  font-family: var(--vscode-editor-font-family);
+  font-size: 0.85em;
+  white-space: pre-wrap;
+}
