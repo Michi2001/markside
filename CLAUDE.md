@@ -18,7 +18,7 @@ npm run package      # build .vsix (vsce)
 npm run package && code --install-extension markside-0.1.0.vsix --force
 ```
 
-`F5` (`.vscode/launch.json`) builds and launches an Extension Development Host with the `notes/` folder as test workspace. There are no automated tests; verify changes manually in that instance.
+`F5` (`.vscode/launch.json`, local only, not in Git) builds and launches an Extension Development Host with the `notes/` folder as test workspace. There are no automated tests; verify changes manually in that instance.
 
 ## Architecture
 

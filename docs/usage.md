@@ -8,15 +8,18 @@ All features in detail. For an overview and installation, see the [README](../RE
 - **Title:** like in Obsidian, the file name is shown as the note's title (underscores as spaces). Editing the title renames the file once you leave it (`Enter` jumps to the start of the note, `Esc` discards the change). Spaces become `_` in the file name, characters not allowed in file names (`/ : * ? " < > |`) become `-`. If the name is taken, the old one stays. The `.assets` folder moves along. While scrolling, the title stays visible as a slim bar at the top; clicking it scrolls back up.
 - **Images:** paste a screenshot or image with `Cmd+V`, or drag and drop it (from Finder with `Shift` held). The image is saved in the folder `<note>.assets/` next to the note and linked relatively. When the note is closed, images no longer linked go to the trash. When the note is renamed, moved, copied or deleted in VS Code, the folder moves, is copied or is deleted with it (in Finder, move note and folder together).
 - **Resize images:** hover over an image and drag one of its four corners; the width is shown live in pixels. Resized images are saved as `<img src="…" width="…">`, which VS Code's preview, GitHub and Obsidian understand as well.
+- **Images in lists:** pasting, dropping or drawing an image with the cursor in a list item puts it into that item (below its text); `Enter` on a selected image starts a new item. Saved compactly, so the list stays tight: the image link on the line below the item's text, or `- ![](…)` for an item that is only an image.
+- **Links:** clicking a relative link (`[setup](../docs/setup.md)`, also to code files) opens the file in the editor group to the left (from the leftmost group: the second one). A fragment `#L12` or `#L12-L20` selects those lines. Web links open in the browser.
+- **Mermaid diagrams:** a code block with the language `mermaid` shows the diagram. *Edit* in the block's toolbar shows the source next to it; the diagram updates while typing, syntax errors are shown instead of the diagram. `latex` code blocks likewise show only the formula until *Edit*.
+- **HTML:** block-level HTML (e.g. `<p align="center"><img …></p>`, tables written in HTML) is rendered, sanitized; double-click edits its source (`Cmd+Enter` or clicking elsewhere applies, `Esc` discards). `<details><summary>…</summary>` sections are collapsed until the summary is clicked. Comments are shown as gray source.
+- **Paste without formatting:** `Cmd+Shift+V` pastes the clipboard as plain text, one paragraph per line.
 - **Move list items:** `Alt+↑` / `Alt+↓` moves only the line of the item under the cursor (or of the selected items) by one line, keeping its indentation, like moving lines in raw Markdown or in OneNote. Sub-items stay where they are and then belong to the item above them. Outside lists, whole paragraphs, headings or images are moved. `Tab` / `Shift+Tab` indents/outdents only the line itself; sub-items keep their level.
 - **Font size:** the *Aa* icon in the editor title (or *Markside: Choose Font Size*) sets the font size of the open note or PDF only (it follows the file when renamed in VS Code). *Default* uses the setting `mdLive.fontSize` again.
 - **Color mode:** *Markside: Choose Color Mode* (setting `mdLive.theme`: `auto`, `light`, `dark`).
 
 ## Keyboard shortcuts
 
-They work in the live editor and in the notes next to PDFs (there only in the note that has focus). Formatting shortcuts toggle: pressing them again removes the formatting.
-
-In lists, all shortcuts except `Alt+M` apply to the whole item under the cursor, even without or with only a partial selection. Exception, highlighting (`Alt+Q/W/E/R/H`): without a selection the whole item, with a selection only the selected text. Outside lists, shortcuts apply to the selected text only.
+They work in the live editor and in the notes next to PDFs (there only in the note that has focus). Formatting shortcuts toggle and apply to the selection: pressing them again removes the formatting. With only a cursor they switch the format on or off for the text typed next. With `Shift` added (`Alt+Shift+B`, `Alt+Shift+W`, …) they apply to the whole text of the list items the selection touches (not `Alt+M`).
 
 | Shortcut | Action | In Markdown |
 |---|---|---|
@@ -27,15 +30,22 @@ In lists, all shortcuts except `Alt+M` apply to the whole item under the cursor,
 | `Alt+Q` / `Alt+E` / `Alt+R` | Red / green / blue highlight (same color again = remove, other color = recolor) | `<mark style="background: #FF5582A6;">text</mark>` |
 | `Alt+X` | Remove highlights of any color | – |
 | `Alt+C` | Inline code (replaces other formatting) | `` `text` `` |
-| `Alt+M` | Inline math (clicking a formula turns it back into text) | `$text$` |
+| `Alt+M` | Inline math (clicking a formula edits it; `Esc` or a click outside closes it) | `$text$` |
+| `Alt+G` | Gray out less important text | `<span style="color: gray;">text</span>` |
 | `Alt+1` … `Alt+6` | Heading level 1–6 (same level again = paragraph) | `# text` … `###### text` |
-| `Alt+^` (key left of 1) | Back to paragraph | – |
-| `Alt+Y` | Collapse/expand the section of the heading the cursor is in; in a sub-item only that item (or its parent if it has no sub-items). Collapsed content shows a pill with the number of hidden blocks/items (click to expand); collapsed list items get a ring around their bullet. Remembered per note | – (view only) |
+| `Alt+^` (key left of 1) | Clear formatting (bold, italic, code, highlights, gray; links stay), headings back to paragraph; without a selection the whole block or list item | – |
+| `Alt+Y` | Collapse/expand the section of the heading the cursor is in; in a sub-item only that item (or its parent if it has no sub-items); in a paragraph directly followed by a list (or a top-level item of that list) that list. Collapsed content shows a pill with the number of hidden blocks/items (click to expand); collapsed list items get a ring around their bullet. Remembered per note | – (view only) |
 | `Alt+K` | Ask Claude Code about the selection | – |
+| `Alt+Shift+K` | Ask and let Claude suggest changes; without a selection: review the whole note | – (`note.assets/.proposals.md`) |
+| `Cmd+Shift+V` | Paste as plain text | – |
 | `Alt+D` | Insert handwriting | Image link to `note.assets/….drawing.svg` |
 | `Alt+↑` / `Alt+↓` | Move list item or block up/down | – |
 | `Tab` / `Shift+Tab` | Indent/outdent list item | – |
 | `Tab` / `Shift+Tab` in a heading | Heading one level lower/higher | – |
+
+## Search
+
+`Cmd+F` opens a search bar in notes and in PDFs (there it searches the PDF's text), prefilled with the selection. Matching ignores case, and a space matches any whitespace (e.g. line breaks in the PDF). `Enter` / `Shift+Enter` jump to the next/previous match, a match in a collapsed section unfolds it. `Esc` closes the bar and jumps back to where the search started; `Cmd+Enter` (or `✕`) closes it and stays at the match with it selected; a click into the document also stays. Afterwards VS Code's Go Back / Go Forward keys (`Ctrl+-` / `Ctrl+Shift+-` on a Mac, or your own bindings) jump between the start and the match.
 
 ## Handwriting
 
@@ -77,7 +87,8 @@ Set `mdLive.drawingDevice` to `sidecar`. `Alt+D`/double-click opens the same dra
 - **Notes are full Markdown** with everything the live editor can do (images, lists, math, handwriting with `Alt+D`, also on the iPad). `Shift+Enter` finishes editing a note. In notes, `Alt+Y` collapses list items and headings.
 - **Placement:** notes on highlights are placed directly on the slide when there is enough free space near the highlight (without covering text, images or other notes), otherwise in the margin. Only in the margin do they show the highlighted text at the top. New notes are written in the margin; only once you leave them do they move onto the slide if there is room. `Alt+P` in a note moves it to the margin for editing; afterwards it is placed again. Notes in the margin that overlap slide down; if they are longer than the page, the gap to the next page grows.
 - **Deleting:** `×` deletes note and highlight; faster: pointer over a highlight and `Delete`/`Backspace`, or `Shift+Delete`/`Shift+Backspace` inside a note (a page note is emptied instead). `Cmd+Z` / `Cmd+Shift+Z` (outside a note) undoes/redoes creating and deleting highlights.
-- **Zooming:** `Ctrl`+wheel or pinch enlarges pages and notes together (the font size setting applies at 100 %). The notes column always reaches to the right edge of the window; its default width is `mdLive.pdfNotesWidth`.
+- **Zooming:** `Ctrl`+wheel or pinch enlarges pages and notes together (the font size setting applies at 100 %; PDFs without their own font size match the PDF's body text). `Alt+1` (or *Markside: Fit PDF to Window Width*) zooms so the pages fill the window's width, again goes back. The notes column always reaches to the right edge of the window; its default width is `mdLive.pdfNotesWidth`. If there is no room for it next to the page, notes lie over the page as colored tabs that open on hover. Long notes in a crowded margin are cut with a fade; hovering or focusing them shows them whole.
+- **Links:** links in the PDF (table of contents, citations, URLs) work with a click; VS Code's Go Back key returns to where you clicked. Selecting text across a link still works.
 - **Storage:** notes are saved automatically in `<file>.pdf.md` next to the PDF (images in `<file>.pdf.assets/`); the PDF itself stays unchanged. The file is a normal note: `## Page 3` holds the page note, `### [highlighted text](#p3=…)` a highlight with its note (the numbers are its position on the page). When the PDF is renamed in VS Code, the notes move along; when it is deleted, the notes file and images go to the trash with it.
 
 | Shortcut (text selected in the PDF) | Action | In `<file>.pdf.md` |
@@ -86,7 +97,10 @@ Set `mdLive.drawingDevice` to `sidecar`. `Alt+D`/double-click opens the same dra
 | `Alt+Shift+Q` / `W` / `E` / `R`, `Alt+A` (random color) or color dot | Highlight and write a note | Heading as above, the note below it |
 | `Alt` + drag a rectangle | Note on an area, with a snapshot | `### [Area](#p3=…&area)` |
 | `Alt+K` | Ask Claude Code about the selection, the highlight under the pointer or the visible page | – (`<file>.pdf.assets/.claude.md`) |
+| `Alt+K` with `Shift` (`Alt+Shift+K`) | The same, and Claude proposes an annotation or corrections | – (`<file>.pdf.assets/.proposals.md`, `.suggestions.md`) |
 | `Ctrl`+wheel / pinch | Zoom pages and notes | – |
+| `Alt+1` | Fit the pages to the window's width | – |
+| `Cmd+F` | Search the PDF's text | – |
 | `Shift+Delete` / `Shift+Backspace` (in a note) | Delete note and highlight (page note: empty it) | Section removed |
 | `Alt+P` (in a note) | Move the note to the margin for editing | – |
 
@@ -100,22 +114,26 @@ Requires the [Claude Code](https://marketplace.visualstudio.com/items?itemName=a
 
 ### Asking about a selection
 
-- **In notes:** select text and press `Alt+K` (or the sparkle icon in the editor title). The file is briefly opened as a text editor, the matching lines are selected and passed to Claude Code as `@file.md#Lx-y`. Drawings in the selection are sent along as PNG images.
+- **In notes:** select text and press `Alt+K` (or the sparkle icon in the editor title). Markside writes `<note>.assets/.claude.md` with the note, the selected passage and its lines, and passes it to Claude Code as an `@` mention; PDFs in the same folder are named as the possible original. Images in the selection are sent along (drawings as PNG, other images by path). Without a selection, the question is about the whole note. Claude only answers in the chat.
 - **In PDFs:** `Alt+K` passes the selected text, otherwise the note or highlight under the pointer, otherwise the visible page. In a note or explanation it is about the selected text, otherwise the bullet at the cursor, otherwise the whole note or explanation. Markside writes `<file>.pdf.assets/.claude.md` with the page number, quote and all notes on that page and passes it as an `@` mention; it also tells Claude to read only that page of the PDF (and neighboring pages if needed). Then just type your question.
+
+### Suggested changes to notes
+
+`Alt+Shift+K` in a note asks like `Alt+K`, but Claude may also suggest changes: wrong or imprecise statements, typos, a central point missing entirely (no extra examples or details). Without a selection (or with the review icon in the editor title) it reviews the whole note, against the PDF next to it if there is one. Each suggestion appears as a card below the passage, with the change as a word diff and the reason; *Accept* applies it (undo with `Cmd+Z`), *Dismiss* discards it. If the passage was changed in the meantime, the card moves to the end of the note and can only be dismissed. Follow-up questions in the same chat can produce further suggestions; `Alt+K` on a card asks about it. Suggestions are stored in `<note>.assets/.proposals.md`.
 
 ### Proposed annotations
 
-For every question, Claude additionally proposes a short annotation after answering in the chat (in `<file>.pdf.assets/.proposals.md`). It appears dashed in violet with ✦ below the note or explanation (for a passage on the slide without a note of its own: in the page note). *Add* inserts it as a sub-bullet below the bullet you asked about, for a selected passage as a new note on that passage (random color like `Alt+A`), for a highlight into its note, otherwise into the page note (undo with `Cmd+Z`); *Dismiss* discards it. If you ask Claude to change a bullet (e.g. rephrase an annotation), it proposes a new version instead, which *Replace* swaps in. Accepted annotations in your notes start with `✦` and are violet, so it stays visible what came from Claude; in Claude's explanations the `✦` is omitted.
+With `Alt+Shift+K` in a PDF, Claude additionally proposes a short annotation after answering in the chat (in `<file>.pdf.assets/.proposals.md`). It appears dashed in violet with ✦ below the note or explanation (for a passage on the slide without a note of its own: in the page note). *Add* inserts it as a sub-bullet below the bullet you asked about, for a selected passage as a new note on that passage (random color like `Alt+A`), for a highlight into its note, otherwise into the page note (undo with `Cmd+Z`); *Dismiss* discards it. If instead of a question you ask for a correction (e.g. "this explanation is wrong"), Claude suggests changes to your note or its explanation as cards in that note or explanation, accepted or dismissed like suggestions in notes (`<file>.pdf.assets/.suggestions.md`). If you ask Claude to change a bullet (e.g. rephrase an annotation), it proposes a new version instead, which *Replace* swaps in. Accepted annotations in your notes start with `✦` and are violet, so it stays visible what came from Claude; in Claude's explanations the `✦` is omitted.
 
 To keep Claude Code from asking for write permission every time, allow it in the workspace of your lectures in `.claude/settings.json`:
 
 ```json
-{ "permissions": { "allow": ["Edit(**/*.pdf.assets/.proposals.md)"] } }
+{ "permissions": { "allow": ["Edit(**/*.assets/.proposals.md)", "Edit(**/*.pdf.assets/.suggestions.md)"] } }
 ```
 
 ### Explaining slides in advance
 
-- The sparkle icon in the PDF's editor title opens a menu: the next 10 unexplained slides from the visible page, a page range (`5-12, 20`), slides about a topic ("everything about the Internet worm"; Claude picks the pages by their text), all unexplained ones, or the next lecture (after the last lecture end up to the next line). Claude Code (`claude` CLI) then runs in the background (progress at the bottom right, cancellable; the sparkle turns into a spinner) and may only write `<file>.pdf.claude.md`; slides already explained are skipped. The same works in Claude Code with `/explain-slides path/to/file.pdf`.
+- The sparkle icon in the PDF's editor title opens a menu: the next 10 unexplained slides from the visible page, a page range (`5-12, 20`), slides about a topic ("everything about the Internet worm"; Claude picks the pages by their text), all unexplained ones, or the next lecture (after the last lecture end up to the next line). Claude Code (`claude` CLI) then runs in the background (spinner in the status bar, click to cancel; the sparkle in the editor title turns into a spinner) and may only write `<file>.pdf.claude.md`; slides already explained are skipped. The same works in Claude Code with `/explain-slides path/to/file.pdf`.
 - Every slide gets its key message and a short explanation in bullets (in the language of the setting `mdLive.claudeLanguage`, default English; unknown terms as their own bullet). It appears live as a tinted box with a ✦ at the top of the page note: collapsed only the key message, a click (or the arrow on the right) expands the bullets. The lightbulb in the editor title expands/collapses all explanations; hide them completely with the setting `mdLive.pdfExplanations`.
 - The text can be selected: `Alt+K` sends the selected passage (or, with the pointer over the box, the whole explanation) as a question to Claude Code.
 - Expanded, the explanation can be edited directly: what you type there is automatically italic (Claude never writes italics), so it always stays clear what is yours; you can also delete Claude's text. Highlight it like notes with `Alt+W`/`Q`/`E`/`R` (cursor in a bullet = whole bullet) or a color dot; `Alt+X` removes highlights. A double-click selects a whole bullet; the collapsed key message is highlighted as a whole. Everything is saved in `<file>.pdf.claude.md`. `×` dismisses an explanation (undo with `Cmd+Z`). Your own notes file is never touched.

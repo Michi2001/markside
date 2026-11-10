@@ -11,11 +11,13 @@ https://github.com/user-attachments/assets/1b1b6b3e-4b06-4faf-919f-758eef49fd7b
 ## Features
 
 ### Live Markdown editor
-- Edit `.md` files in their rendered form, in a single tab (built on [Milkdown Crepe](https://milkdown.dev)): headings, lists, tables, code blocks, math (KaTeX), task lists.
+- Edit `.md` files in their rendered form, in a single tab (built on [Milkdown Crepe](https://milkdown.dev)): headings, lists, tables, code blocks, math (KaTeX), task lists, [Mermaid](https://mermaid.js.org) diagrams.
 - **Raw Markdown stays untouched:** only the blocks you actually change are reformatted; everything else keeps its original source, so diffs stay small.
 - Inline title like Obsidian: editing it renames the file.
 - Paste or drop images; they are saved in a per-note folder `note.assets/` and moved, copied and cleaned up together with the note.
-- Resize images by dragging their corners.
+- Resize images by dragging their corners; images can also sit inside list items.
+- Block-level HTML is rendered (sanitized; double-click edits the source), `<details>` sections collapse.
+- Relative links to other files open in the neighboring editor group, `#L12-L20` selects those lines.
 - Colored highlights (`==text==`, compatible with Obsidian Highlightr), collapsible sections, moving list items with `Alt+↑/↓`, keyboard shortcuts for all formatting.
 
 ### PDF margin notes
@@ -89,10 +91,11 @@ The full manual with all features and settings is in [docs/usage.md](docs/usage.
 | `Alt+G` | Gray out less important text (`<span style="color: gray;">`) |
 | `Alt+1` … `Alt+6` | Heading level 1–6 (same level again: back to paragraph) |
 | `Alt+^` | Clear formatting: bold, italic, code, highlights etc. (links stay), headings back to paragraph |
-| `Alt+Y` | Collapse/expand the section or list item at the cursor |
+| `Alt+Y` | Collapse/expand the section or list item at the cursor, or the list below a paragraph |
 | `Alt+↑` / `Alt+↓` | Move list item or block up/down |
 | `Tab` / `Shift+Tab` | Indent/outdent list item; in a heading, change its level |
 | `Alt+D` | Insert handwriting |
+| `Cmd+Shift+V` | Paste as plain text |
 | `Alt+K` | Ask Claude Code about the selection |
 | `Alt+Shift+K` | Ask and let Claude suggest changes; without a selection: review the whole note |
 
@@ -118,6 +121,7 @@ In the PDF view (text selected in the PDF):
 | `Delete` (pointer over a highlight), `Shift+Delete` (in a note) | Delete highlight and note |
 | `Cmd+Z` / `Cmd+Shift+Z` (outside notes) | Undo/redo creating and deleting notes |
 | `Ctrl`+wheel / pinch | Zoom pages and notes together |
+| `Alt+1` (outside notes) | Fit the pages to the window's width (again: back) |
 | VS Code's Go Back / Go Forward (`Ctrl+-` / `Ctrl+Shift+-`, or your own bindings) | After following a link: back to where you clicked / forward to the target |
 
 ## Files on disk
@@ -164,7 +168,7 @@ npx tsc --noEmit     # typecheck
 npm run package      # build the .vsix
 ```
 
-`F5` launches an Extension Development Host with the `notes/` folder as test workspace.
+To debug, add a launch configuration of type `extensionHost` (`.vscode/` is not part of the repo).
 
 ## License
 
